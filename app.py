@@ -143,7 +143,7 @@ def load_all_data(data_folder: str = DATA_FOLDER) -> list:
                         'Screening_Results',
                         usecols=[
                             'Sector',   'Sector_RS_Pct_CW',   'Sector_RS_Pct_EW',
-                            'Industry', 'Industry_RS_Pct_CW',
+                            'Industry', 'Industry_RS_Pct_CW', 'Industry_RS_Pct_EW',
                         ]
                     )
 
@@ -157,12 +157,13 @@ def load_all_data(data_folder: str = DATA_FOLDER) -> list:
                            )
                     )
 
-                    # インダストリー集計
+                    # インダストリー集計（CW・EW両方）
                     industry_rs_df = (
                         raw.dropna(subset=['Industry'])
                            .groupby('Industry', as_index=False)
                            .agg(
                                Industry_RS_Pct_CW=('Industry_RS_Pct_CW', 'first'),
+                               Industry_RS_Pct_EW=('Industry_RS_Pct_EW', 'first'),
                            )
                     )
 
@@ -196,7 +197,7 @@ def load_all_data(data_folder: str = DATA_FOLDER) -> list:
 
 
 # =============================================
-# セクター用ヒートマップ（CW / EW 共通）
+# セクター用ヒートマップ
 # =============================================
 
 def build_sector_heatmap(
@@ -219,11 +220,8 @@ def build_sector_heatmap(
 
     ts_df = pd.concat(records, ignore_index=True)
 
-    pivot_val = ts_df.pivot_table(
-        index='Sector',
-        columns='Date',
-        values=value_col,
-        aggfunc='first'
+    pivot_val  = ts_df.pivot_table(
+        index='Sector', columns='Date', values=value_col, aggfunc='first'
     )
     pivot_rank = pivot_val.rank(axis=0, ascending=False, method='min').astype(int)
 
@@ -232,16 +230,16 @@ def build_sector_heatmap(
     pivot_val  = pivot_val.loc[sort_order]
     pivot_rank = pivot_rank.loc[sort_order]
 
-    x_labels  = [d.strftime('%m/%d') for d in pivot_val.columns]
-    y_labels  = pivot_val.index.tolist()
+    x_labels = [d.strftime('%m/%d') for d in pivot_val.columns]
+    y_labels = pivot_val.index.tolist()
+    n = len(y_labels)
 
     fig = go.Figure(data=go.Heatmap(
         z=pivot_val.values,
         x=x_labels,
         y=y_labels,
         colorscale='RdYlGn',
-        zmin=0,
-        zmax=100,
+        zmin=0, zmax=100,
         text=pivot_rank.values,
         texttemplate='%{text}',
         textfont={"size": 12},
@@ -260,8 +258,6 @@ def build_sector_heatmap(
             '<extra></extra>'
         )
     ))
-
-    n = len(y_labels)
     fig.update_layout(
         title=dict(text=title, font=dict(size=15)),
         xaxis=dict(title="日付", side='bottom', tickangle=-30),
@@ -274,14 +270,14 @@ def build_sector_heatmap(
 
 
 # =============================================
-# インダストリー用ヒートマップ
+# インダストリー用ヒートマップ（CW / EW 共通）
 # =============================================
 
 def build_industry_heatmap(
     month_data: list,
     value_col: str,
     title: str,
-    top_n: int = 30,          # 表示する上位インダストリー数
+    top_n: int = 30,
 ) -> go.Figure | None:
 
     records = []
@@ -298,30 +294,26 @@ def build_industry_heatmap(
 
     ts_df = pd.concat(records, ignore_index=True)
 
-    pivot_val = ts_df.pivot_table(
-        index='Industry',
-        columns='Date',
-        values=value_col,
-        aggfunc='first'
+    pivot_val  = ts_df.pivot_table(
+        index='Industry', columns='Date', values=value_col, aggfunc='first'
     )
     pivot_rank = pivot_val.rank(axis=0, ascending=False, method='min').astype(int)
 
-    # 最新日のランクで昇順ソートし上位 top_n を表示
-    latest_col  = pivot_val.columns[-1]
-    sort_order  = pivot_rank[latest_col].sort_values(ascending=True).index
-    pivot_val   = pivot_val.loc[sort_order].head(top_n)
-    pivot_rank  = pivot_rank.loc[sort_order].head(top_n)
+    latest_col = pivot_val.columns[-1]
+    sort_order = pivot_rank[latest_col].sort_values(ascending=True).index
+    pivot_val  = pivot_val.loc[sort_order].head(top_n)
+    pivot_rank = pivot_rank.loc[sort_order].head(top_n)
 
-    x_labels  = [d.strftime('%m/%d') for d in pivot_val.columns]
-    y_labels  = pivot_val.index.tolist()
+    x_labels = [d.strftime('%m/%d') for d in pivot_val.columns]
+    y_labels = pivot_val.index.tolist()
+    n = len(y_labels)
 
     fig = go.Figure(data=go.Heatmap(
         z=pivot_val.values,
         x=x_labels,
         y=y_labels,
         colorscale='RdYlGn',
-        zmin=0,
-        zmax=100,
+        zmin=0, zmax=100,
         text=pivot_rank.values,
         texttemplate='%{text}',
         textfont={"size": 10},
@@ -340,8 +332,6 @@ def build_industry_heatmap(
             '<extra></extra>'
         )
     ))
-
-    n = len(y_labels)
     fig.update_layout(
         title=dict(text=title, font=dict(size=15)),
         xaxis=dict(title="日付", side='bottom', tickangle=-30),
@@ -354,7 +344,7 @@ def build_industry_heatmap(
 
 
 # =============================================
-# 比較表生成
+# セクター比較表
 # =============================================
 
 def build_latest_sector_table(latest_df: pd.DataFrame) -> pd.DataFrame:
@@ -431,66 +421,75 @@ month_data = filter_data_by_month(all_data, selected_month)
 st.caption(f"📅 {selected_month} のデータ: {len(month_data)} 日分")
 
 # ── タブ ─────────────────────────────────────────────────
-tab_cw, tab_ew, tab_industry, tab_compare = st.tabs([
+tab_sec_cw, tab_sec_ew, tab_ind_cw, tab_ind_ew, tab_compare = st.tabs([
     "📈 セクター CW",
     "⚖️ セクター EW",
     "🏭 インダストリー CW",
+    "🏭 インダストリー EW",
     "🔀 セクター CW/EW 比較",
 ])
 
 # ---- セクター CW ----------------------------------------
-with tab_cw:
+with tab_sec_cw:
     if len(month_data) >= 2:
         fig = build_sector_heatmap(
             month_data,
             value_col='Sector_RS_Pct_CW',
             title=f"セクター RS_Pct_CW 推移 ― {selected_month}",
         )
-        if fig:
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("CW データが不足しています。")
+        st.plotly_chart(fig, use_container_width=True) if fig else st.info("CW データが不足しています。")
     else:
         st.info("データが1日分しかありません（最低2日分必要）。")
 
 # ---- セクター EW ----------------------------------------
-with tab_ew:
+with tab_sec_ew:
     if len(month_data) >= 2:
         fig = build_sector_heatmap(
             month_data,
             value_col='Sector_RS_Pct_EW',
             title=f"セクター RS_Pct_EW 推移 ― {selected_month}",
         )
-        if fig:
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("EW データが不足しています。")
+        st.plotly_chart(fig, use_container_width=True) if fig else st.info("EW データが不足しています。")
     else:
         st.info("データが1日分しかありません（最低2日分必要）。")
 
 # ---- インダストリー CW ----------------------------------
-with tab_industry:
+with tab_ind_cw:
     if len(month_data) >= 2:
         col_slider, _ = st.columns([2, 8])
         with col_slider:
-            top_n = st.slider(
+            top_n_cw = st.slider(
                 "表示するインダストリー数（上位）",
-                min_value=10,
-                max_value=50,
-                value=30,
-                step=5,
-                key="industry_top_n"
+                min_value=10, max_value=50, value=30, step=5,
+                key="industry_top_n_cw"
             )
         fig = build_industry_heatmap(
             month_data,
             value_col='Industry_RS_Pct_CW',
-            title=f"インダストリー RS_Pct_CW 推移（上位{top_n}） ― {selected_month}",
-            top_n=top_n,
+            title=f"インダストリー RS_Pct_CW 推移（上位{top_n_cw}） ― {selected_month}",
+            top_n=top_n_cw,
         )
-        if fig:
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("インダストリー CW データが不足しています。")
+        st.plotly_chart(fig, use_container_width=True) if fig else st.info("インダストリー CW データが不足しています。")
+    else:
+        st.info("データが1日分しかありません（最低2日分必要）。")
+
+# ---- インダストリー EW ----------------------------------
+with tab_ind_ew:
+    if len(month_data) >= 2:
+        col_slider, _ = st.columns([2, 8])
+        with col_slider:
+            top_n_ew = st.slider(
+                "表示するインダストリー数（上位）",
+                min_value=10, max_value=50, value=30, step=5,
+                key="industry_top_n_ew"
+            )
+        fig = build_industry_heatmap(
+            month_data,
+            value_col='Industry_RS_Pct_EW',
+            title=f"インダストリー RS_Pct_EW 推移（上位{top_n_ew}） ― {selected_month}",
+            top_n=top_n_ew,
+        )
+        st.plotly_chart(fig, use_container_width=True) if fig else st.info("インダストリー EW データが不足しています。")
     else:
         st.info("データが1日分しかありません（最低2日分必要）。")
 
@@ -514,7 +513,6 @@ with tab_compare:
             })
         )
         st.dataframe(styled, use_container_width=True, hide_index=True, height=450)
-
         st.markdown("""
         **順位差（EW－CW）の見方：**
         - 🟢 **プラス（緑）**: EWのほうが上位 → 中小型株が大型株より強い
