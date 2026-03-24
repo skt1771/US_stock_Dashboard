@@ -211,13 +211,13 @@ def build_heatmap(
     )
 
     # ランクのピボット（セル内テキスト用）
-    # 各日付ごとにRS値の降順でランク付け（1位が最高RS）
     pivot_rank = pivot_val.rank(axis=0, ascending=False, method='min').astype(int)
 
-    # 最新日のランクで昇順ソート
-    # → Plotlyは下から上に描画するため、昇順にすると画面上は上が1位になる
+    # 最新日のランクで降順ソート
+    # → Plotlyは下から上に描画するため、降順にすると画面上は上が最下位・下が1位になる
+    # → さらに autorange='reversed' でY軸を反転させることで上が1位になる
     latest_col = pivot_val.columns[-1]
-    sort_order = pivot_rank[latest_col].sort_values(ascending=True).index
+    sort_order = pivot_rank[latest_col].sort_values(ascending=False).index
     pivot_val  = pivot_val.loc[sort_order]
     pivot_rank = pivot_rank.loc[sort_order]
 
@@ -234,7 +234,7 @@ def build_heatmap(
         zmin=0,
         zmax=100,
         text=text_vals,
-        texttemplate='%{text}',     # ランク番号をそのまま表示
+        texttemplate='%{text}',
         textfont={"size": 12},
         hoverongaps=False,
         colorbar=dict(
@@ -256,7 +256,10 @@ def build_heatmap(
     fig.update_layout(
         title=dict(text=title, font=dict(size=15)),
         xaxis=dict(title="日付", side='bottom', tickangle=-30),
-        yaxis=dict(title="セクター"),
+        yaxis=dict(
+            title="セクター",
+            autorange='reversed',  # Y軸を反転 → 上が1位（数字が小さい順）
+        ),
         height=max(400, n * 52 + 160),
         margin=dict(l=200, r=60, t=70, b=80),
         font=dict(size=11),
