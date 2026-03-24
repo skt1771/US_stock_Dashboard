@@ -24,7 +24,6 @@ DATA_FOLDER = "data"
 # =============================================
 
 def get_display_date(screening_date: datetime) -> datetime:
-    """スクリーニング実行日の前日を表示日とする"""
     return screening_date - timedelta(days=1)
 
 
@@ -53,8 +52,9 @@ def filter_data_by_month(all_data: list, selected_month: str) -> list:
 @st.cache_data(ttl=300)
 def load_all_data(data_folder: str = DATA_FOLDER) -> list:
     """
-    Screening_Results シートから Sector と Sector_RS_Pct_CW を抽出。
-    セクターごとに値は同一なので first() で代表値を取得する。
+    Screening_Results シートから
+      Sector / Sector_RS_Pct_CW / Sector_RS_Pct_EW
+    を抽出。セクターごとに first() で代表値を取得する。
     """
     all_data = []
 
@@ -79,7 +79,6 @@ def load_all_data(data_folder: str = DATA_FOLDER) -> list:
         status_ph.text(f"読み込み中: {filename}  ({idx+1}/{len(excel_files)})")
 
         try:
-            # ファイル名から日付を抽出（例: ..._20260323_...xlsx）
             parts = filename.split('_')
             date_str = next((p for p in parts if len(p) == 8 and p.isdigit()), None)
             date = datetime.strptime(date_str, '%Y%m%d') if date_str else datetime.now()
@@ -91,13 +90,15 @@ def load_all_data(data_folder: str = DATA_FOLDER) -> list:
                 if 'Screening_Results' in excel.sheet_names:
                     raw = excel.parse(
                         'Screening_Results',
-                        usecols=['Sector', 'Sector_RS_Pct_CW']
+                        usecols=['Sector', 'Sector_RS_Pct_CW', 'Sector_RS_Pct_EW']
                     )
-                    # セクターごとに Sector_RS_Pct_CW の代表値（first）を取得
                     sector_rs_df = (
-                        raw.dropna(subset=['Sector', 'Sector_RS_Pct_CW'])
-                           .groupby('Sector', as_index=False)['Sector_RS_Pct_CW']
-                           .first()
+                        raw.dropna(subset=['Sector'])
+                           .groupby('Sector', as_index=False)
+                           .agg(
+                               Sector_RS_Pct_CW=('Sector_RS_Pct_CW', 'first'),
+                               Sector_RS_Pct_EW=('Sector_RS_Pct_EW', 'first'),
+                           )
                     )
 
                 # ── Market_Summary ─────────────────────────────────
@@ -113,7 +114,7 @@ def load_all_data(data_folder: str = DATA_FOLDER) -> list:
             all_data.append({
                 'date':           date,
                 'display_date':   get_display_date(date),
-                'sector_rs_df':   sector_rs_df,   # Sector / Sector_RS_Pct_CW
+                'sector_rs_df':   sector_rs_df,
                 'market_summary': market_summary,
                 'filename':       filename,
             })
@@ -130,45 +131,48 @@ def load_all_data(data_folder: str = DATA_FOLDER) -> list:
 
 
 # =============================================
-# ヒートマップ描画
+# ヒートマップ描画（CW / EW 共通）
 # =============================================
 
-def build_heatmap(month_data: list, selected_month: str) -> go.Figure | None:
+def build_heatmap(
+    month_data: list,
+    value_col: str,          # 'Sector_RS_Pct_CW' or 'Sector_RS_Pct_EW'
+    title: str,
+) -> go.Figure | None:
     """
-    各日付の Sector_RS_Pct_CW 値をそのまま使ってヒートマップを描画する。
-    セル内表示 : Sector_RS_Pct_CW の実値（例: 63, 99, 81）
-    セルの色   : 値が高いほど緑、低いほど赤
+    value_col の実値（0〜100）をそのまま色スケールに使うヒートマップ。
+    最新日の値で降順ソート（値が高いセクターを上段に表示）。
     """
     records = []
     for dp in month_data:
         df = dp['sector_rs_df']
         if df is None or df.empty:
             continue
-        df = df.copy()
-        df['Date'] = dp['display_date']
-        records.append(df)
+        if value_col not in df.columns:
+            continue
+        tmp = df[['Sector', value_col]].copy()
+        tmp['Date'] = dp['display_date']
+        records.append(tmp)
 
     if not records:
         return None
 
     ts_df = pd.concat(records, ignore_index=True)
 
-    # ピボット: 行=Sector, 列=Date, 値=Sector_RS_Pct_CW
     pivot = ts_df.pivot_table(
         index='Sector',
         columns='Date',
-        values='Sector_RS_Pct_CW',
+        values=value_col,
         aggfunc='first'
     )
 
-    # 最新日の値で降順ソート（RS値が高いセクターを上に）
+    # 最新日の値で降順ソート
     latest_col = pivot.columns[-1]
     pivot = pivot.sort_values(by=latest_col, ascending=False)
 
     x_labels = [d.strftime('%m/%d') for d in pivot.columns]
     y_labels  = pivot.index.tolist()
-    z_vals    = pivot.values                          # 実値をそのまま色に使う
-    text_vals = pivot.values.astype(float)            # セル内テキスト
+    z_vals    = pivot.values
 
     fig = go.Figure(data=go.Heatmap(
         z=z_vals,
@@ -177,12 +181,12 @@ def build_heatmap(month_data: list, selected_month: str) -> go.Figure | None:
         colorscale='RdYlGn',
         zmin=0,
         zmax=100,
-        text=text_vals,
-        texttemplate='%{text:.0f}',   # 小数なし整数表示
+        text=z_vals,
+        texttemplate='%{text:.0f}',
         textfont={"size": 12},
         hoverongaps=False,
         colorbar=dict(
-            title="RS%（CW）",
+            title="RS%",
             tickmode='array',
             tickvals=[0, 25, 50, 75, 100],
             ticktext=['0', '25', '50', '75', '100'],
@@ -190,24 +194,47 @@ def build_heatmap(month_data: list, selected_month: str) -> go.Figure | None:
         hovertemplate=(
             '<b>セクター</b>: %{y}<br>'
             '<b>日付</b>: %{x}<br>'
-            '<b>RS_Pct_CW</b>: %{z:.1f}<br>'
+            f'<b>{value_col}</b>: ' + '%{z:.1f}<br>'
             '<extra></extra>'
         )
     ))
 
-    n_sectors = len(y_labels)
+    n = len(y_labels)
     fig.update_layout(
-        title=dict(
-            text=f"セクター Sector_RS_Pct_CW 推移 ― {selected_month}",
-            font=dict(size=16)
-        ),
+        title=dict(text=title, font=dict(size=15)),
         xaxis=dict(title="日付", side='bottom', tickangle=-30),
         yaxis=dict(title="セクター"),
-        height=max(400, n_sectors * 52 + 160),
-        margin=dict(l=200, r=80, t=80, b=80),
+        height=max(400, n * 52 + 160),
+        margin=dict(l=200, r=60, t=70, b=80),
         font=dict(size=11),
     )
     return fig
+
+
+# =============================================
+# 最新ランキング表（CW / EW 並列）
+# =============================================
+
+def build_latest_table(latest_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    CW / EW 両方の値を含む最新ランキング表を生成する。
+    CW の値で降順ソートし、EW のランクを別列で付与する。
+    """
+    if latest_df is None or latest_df.empty:
+        return pd.DataFrame()
+
+    df = latest_df[['Sector', 'Sector_RS_Pct_CW', 'Sector_RS_Pct_EW']].copy()
+
+    # CW ランク
+    df = df.sort_values('Sector_RS_Pct_CW', ascending=False).reset_index(drop=True)
+    df.insert(0, 'CW Rank', range(1, len(df) + 1))
+
+    # EW ランク（値が大きいほど上位）
+    ew_rank = df['Sector_RS_Pct_EW'].rank(ascending=False, method='min').astype(int)
+    df.insert(3, 'EW Rank', ew_rank)
+
+    df.columns = ['CW順位', 'セクター', 'RS%（CW）', 'EW順位', 'RS%（EW）']
+    return df
 
 
 # =============================================
@@ -250,8 +277,8 @@ if latest['market_summary']:
 
 st.markdown("---")
 
-# ── セクターRS_CW 推移 ────────────────────────────────────
-st.header("📊 セクター RS_Pct_CW 推移")
+# ── 月選択（CW / EW 共通） ───────────────────────────────
+st.header("📊 セクター RS 推移（CW / EW）")
 
 available_months = get_available_months(all_data)
 
@@ -261,38 +288,91 @@ with col_sel:
         "表示する月を選択",
         options=available_months,
         index=0,
-        key="sector_cw_month"
+        key="sector_month"
     )
 
 month_data = filter_data_by_month(all_data, selected_month)
+st.caption(f"📅 {selected_month} のデータ: {len(month_data)} 日分")
 
-if len(month_data) >= 2:
-    fig = build_heatmap(month_data, selected_month)
-    if fig:
-        st.plotly_chart(fig, use_container_width=True)
+# ── CW / EW タブ ────────────────────────────────────────
+tab_cw, tab_ew, tab_compare = st.tabs([
+    "📈 Cap Weight（CW）",
+    "⚖️ Equal Weight（EW）",
+    "🔀 CW / EW 比較表",
+])
+
+with tab_cw:
+    if len(month_data) >= 2:
+        fig_cw = build_heatmap(
+            month_data,
+            value_col='Sector_RS_Pct_CW',
+            title=f"セクター RS_Pct_CW 推移 ― {selected_month}",
+        )
+        if fig_cw:
+            st.plotly_chart(fig_cw, use_container_width=True)
+        else:
+            st.info("CW データが不足しています。")
     else:
-        st.info("ヒートマップの生成に必要なデータが不足しています。")
-    st.caption(f"📅 {selected_month} のデータ: {len(month_data)} 日分")
-else:
-    st.info(f"{selected_month} のデータが1日分しかありません（最低2日分必要）。")
+        st.info("データが1日分しかありません（最低2日分必要）。")
 
-st.markdown("---")
+with tab_ew:
+    if len(month_data) >= 2:
+        fig_ew = build_heatmap(
+            month_data,
+            value_col='Sector_RS_Pct_EW',
+            title=f"セクター RS_Pct_EW 推移 ― {selected_month}",
+        )
+        if fig_ew:
+            st.plotly_chart(fig_ew, use_container_width=True)
+        else:
+            st.info("EW データが不足しています。")
+    else:
+        st.info("データが1日分しかありません（最低2日分必要）。")
 
-# ── 最新セクターランキング表 ─────────────────────────────
-st.subheader("📋 最新セクター RS_Pct_CW ランキング")
+with tab_compare:
+    st.subheader("📋 最新セクター CW / EW ランキング比較")
+    st.caption("CW順位で降順ソート。EW順位はEW値に基づく独立したランクです。")
 
-latest_df = latest['sector_rs_df']
-if latest_df is not None and not latest_df.empty:
-    disp = (
-        latest_df
-        .sort_values('Sector_RS_Pct_CW', ascending=False)
-        .reset_index(drop=True)
-    )
-    disp.index += 1
-    disp.index.name = 'Rank'
-    disp.columns = ['セクター', 'RS%（CW）']
-    st.dataframe(disp, use_container_width=True, height=430)
-else:
-    st.info("最新ファイルに Screening_Results シートが見つかりません。")
+    latest_df = latest['sector_rs_df']
+    compare_df = build_latest_table(latest_df)
+
+    if not compare_df.empty:
+
+        # CW順位とEW順位の差分を追加（正=CWのほうが上位、負=EWのほうが上位）
+        compare_df['順位差(CW-EW)'] = compare_df['EW順位'] - compare_df['CW順位']
+
+        def color_diff(val):
+            """順位差をカラーで強調"""
+            if val > 0:
+                # EWのほうが上位（CWに比べて小型株が強い）
+                return 'color: #2e7d32; font-weight: bold'
+            elif val < 0:
+                # CWのほうが上位（大型株が強い）
+                return 'color: #c62828; font-weight: bold'
+            return ''
+
+        styled = (
+            compare_df.style
+            .applymap(color_diff, subset=['順位差(CW-EW)'])
+            .format({
+                'RS%（CW）': '{:.0f}',
+                'RS%（EW）': '{:.0f}',
+                '順位差(CW-EW)': '{:+d}',
+            })
+            .background_gradient(
+                subset=['RS%（CW）', 'RS%（EW）'],
+                cmap='RdYlGn',
+                vmin=0, vmax=100
+            )
+        )
+        st.dataframe(styled, use_container_width=True, hide_index=True, height=450)
+
+        st.markdown("""
+        **順位差（CW－EW）の見方：**
+        - 🟢 **プラス（緑）**: EWのほうが上位 → 中小型株が大型株より強い
+        - 🔴 **マイナス（赤）**: CWのほうが上位 → 大型株が中小型株より強い
+        """)
+    else:
+        st.info("最新ファイルに Screening_Results シートが見つかりません。")
 
 gc.collect()
