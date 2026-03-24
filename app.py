@@ -147,7 +147,6 @@ def load_all_data(data_folder: str = DATA_FOLDER) -> list:
                         ]
                     )
 
-                    # セクター集計
                     sector_rs_df = (
                         raw.dropna(subset=['Sector'])
                            .groupby('Sector', as_index=False)
@@ -157,7 +156,6 @@ def load_all_data(data_folder: str = DATA_FOLDER) -> list:
                            )
                     )
 
-                    # インダストリー集計（CW・EW両方）
                     industry_rs_df = (
                         raw.dropna(subset=['Industry'])
                            .groupby('Industry', as_index=False)
@@ -437,7 +435,10 @@ with tab_sec_cw:
             value_col='Sector_RS_Pct_CW',
             title=f"セクター RS_Pct_CW 推移 ― {selected_month}",
         )
-        st.plotly_chart(fig, use_container_width=True) if fig else st.info("CW データが不足しています。")
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("CW データが不足しています。")
     else:
         st.info("データが1日分しかありません（最低2日分必要）。")
 
@@ -449,7 +450,10 @@ with tab_sec_ew:
             value_col='Sector_RS_Pct_EW',
             title=f"セクター RS_Pct_EW 推移 ― {selected_month}",
         )
-        st.plotly_chart(fig, use_container_width=True) if fig else st.info("EW データが不足しています。")
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("EW データが不足しています。")
     else:
         st.info("データが1日分しかありません（最低2日分必要）。")
 
@@ -469,7 +473,10 @@ with tab_ind_cw:
             title=f"インダストリー RS_Pct_CW 推移（上位{top_n_cw}） ― {selected_month}",
             top_n=top_n_cw,
         )
-        st.plotly_chart(fig, use_container_width=True) if fig else st.info("インダストリー CW データが不足しています。")
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("インダストリー CW データが不足しています。")
     else:
         st.info("データが1日分しかありません（最低2日分必要）。")
 
@@ -489,7 +496,10 @@ with tab_ind_ew:
             title=f"インダストリー RS_Pct_EW 推移（上位{top_n_ew}） ― {selected_month}",
             top_n=top_n_ew,
         )
-        st.plotly_chart(fig, use_container_width=True) if fig else st.info("インダストリー EW データが不足しています。")
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("インダストリー EW データが不足しています。")
     else:
         st.info("データが1日分しかありません（最低2日分必要）。")
 
