@@ -408,7 +408,7 @@ def build_latest_industry_table(latest_df: pd.DataFrame, top_n: int = 30) -> pd.
 
 
 # =============================================
-# モメンタム銘柄スクリーニング共通関数
+# モメンタム銘柄スクリーニング（CW or EW 単体）
 # =============================================
 
 def render_momentum_tab(
@@ -518,12 +518,12 @@ def render_momentum_tab(
                 )
                 sector_rs_min = st.number_input(
                     f"Sector RS Pct {rs_mode} 最小値",
-                    value=79, step=1,           # ★ 修正
+                    value=79, step=1,
                     key=f"{tab_key}_sec_rs_min"
                 )
                 industry_rs_min = st.number_input(
                     f"Industry RS Pct {rs_mode} 最小値",
-                    value=80, step=1,           # ★ 修正
+                    value=80, step=1,
                     key=f"{tab_key}_ind_rs_min2"
                 )
             else:
@@ -560,7 +560,7 @@ def render_momentum_tab(
             )
             st.info("\n".join(lines))
 
-    # ── フィルタリング実行 ────────────────────────────────
+    # フィルタリング実行
     filtered = stock_df.copy()
 
     if enable_technical:
@@ -599,7 +599,7 @@ def render_momentum_tab(
     if enable_fundamental and 'Fundamental_Score' in filtered.columns:
         filtered = filtered[filtered['Fundamental_Score'] >= fundamental_min]
 
-    # ── 結果表示 ──────────────────────────────────────────
+    # 結果表示
     st.markdown("---")
     st.subheader(f"🚀 フィルタリング結果: {len(filtered)} 銘柄")
 
@@ -612,6 +612,338 @@ def render_momentum_tab(
         'Screening_Score', 'Technical_Score', 'Fundamental_Score',
         'RS_Score', 'Individual_RS_Percentile',
         sector_rs_col, industry_rs_col,
+        'Current_Price', 'MA21', 'MA50', 'MA150',
+        'ATR_Pct_from_MA50', 'ADR',
+    ]
+    display_cols = [c for c in display_cols_ordered if c in filtered.columns]
+
+    sort_key = next(
+        (c for c in ['Screening_Score', 'RS_Score', 'Individual_RS_Percentile']
+         if c in filtered.columns),
+        display_cols[0]
+    )
+
+    st.dataframe(
+        filtered[display_cols].sort_values(sort_key, ascending=False),
+        use_container_width=True,
+        height=600,
+        hide_index=True,
+    )
+
+    with st.expander("📊 フィルタリング結果の統計"):
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.metric("銘柄数", len(filtered))
+        with c2:
+            if 'Screening_Score' in filtered.columns:
+                st.metric("平均スコア", f"{filtered['Screening_Score'].mean():.1f}")
+        with c3:
+            if 'Individual_RS_Percentile' in filtered.columns:
+                st.metric(
+                    "平均個別RS",
+                    f"{filtered['Individual_RS_Percentile'].mean():.1f}%"
+                )
+        with c4:
+            if 'ADR' in filtered.columns:
+                st.metric("平均ADR", f"{filtered['ADR'].mean():.1f}%")
+
+        if 'Sector' in filtered.columns:
+            st.markdown("**セクター分布:**")
+            st.bar_chart(filtered['Sector'].value_counts())
+
+    dl1, dl2 = st.columns(2)
+    with dl1:
+        csv = filtered[display_cols].to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 CSVダウンロード（全データ）",
+            data=csv,
+            file_name=(
+                f"momentum_{rs_mode.lower()}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            ),
+            mime='text/csv',
+            key=f"{tab_key}_dl_csv",
+        )
+    with dl2:
+        if 'Symbol' in filtered.columns:
+            syms = (
+                filtered.sort_values(sort_key, ascending=False)['Symbol']
+                .dropna().astype(str).tolist()
+            )
+            st.download_button(
+                label="📝 Symbolリスト（TXT）",
+                data=','.join(syms),
+                file_name=(
+                    f"momentum_symbols_{rs_mode.lower()}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+                ),
+                mime='text/plain',
+                key=f"{tab_key}_dl_txt",
+            )
+
+    if 'Symbol' in filtered.columns:
+        with st.expander("📌 Symbolリスト表示（TradingView用）"):
+            syms = (
+                filtered.sort_values(sort_key, ascending=False)['Symbol']
+                .dropna().astype(str).tolist()
+            )
+            st.markdown("**カンマ区切り（コピー用）:**")
+            st.code(','.join(syms), language=None)
+            st.success(f"✅ 合計 {len(syms)} 銘柄")
+            if len(syms) > 10:
+                st.info(f"📊 上位10銘柄: {', '.join(syms[:10])}")
+
+
+# =============================================
+# ★ モメンタム銘柄スクリーニング（CW + EW 両条件）
+# =============================================
+
+def render_momentum_tab_both(
+    stock_df: pd.DataFrame,
+    display_date: str,
+    tab_key: str,
+):
+    if stock_df is None or stock_df.empty:
+        st.error(
+            "銘柄レベルのデータが読み込めませんでした。"
+            " Screening_Results シートに必要なカラムが含まれているか確認してください。"
+        )
+        return
+
+    st.caption(
+        f"📅 データ日付: {display_date}　　"
+        f"対象銘柄数: {len(stock_df):,} 銘柄"
+    )
+
+    with st.expander("⚙️ フィルター条件を設定する", expanded=True):
+
+        # ── テクニカル・価格・ファンダメンタル ──────────────
+        st.subheader("📊 テクニカル条件")
+        col_t1, col_t2 = st.columns(2)
+
+        with col_t1:
+            enable_technical = st.checkbox(
+                "テクニカル条件を有効にする", value=True,
+                key=f"{tab_key}_enable_tech"
+            )
+            if enable_technical:
+                st.markdown("**ATR条件**")
+                atr_min = st.number_input(
+                    "ATR from MA50 最小値 (%)", value=2.0, step=0.1,
+                    key=f"{tab_key}_atr_min"
+                )
+                atr_max = st.number_input(
+                    "ATR from MA50 最大値 (%)", value=5.0, step=0.1,
+                    key=f"{tab_key}_atr_max"
+                )
+                adr_min = st.number_input(
+                    "ADR 最小値 (%)", value=4.0, step=0.5,
+                    key=f"{tab_key}_adr_min"
+                )
+            else:
+                atr_min = atr_max = adr_min = 0.0
+                st.info("テクニカル条件は無効です。")
+
+        with col_t2:
+            if enable_technical:
+                st.markdown("**移動平均線条件**")
+                ma21_cond = st.checkbox(
+                    "株価 > MA21（21日移動平均）", value=True,
+                    key=f"{tab_key}_ma21"
+                )
+                ma50_cond = st.checkbox(
+                    "株価 > MA50（50日移動平均）", value=True,
+                    key=f"{tab_key}_ma50"
+                )
+                ma150_cond = st.checkbox(
+                    "株価 > MA150（150日移動平均）", value=True,
+                    key=f"{tab_key}_ma150"
+                )
+                ma_order_cond = st.checkbox(
+                    "MA21 > MA50 > MA150（上昇トレンド）", value=True,
+                    key=f"{tab_key}_ma_order"
+                )
+            else:
+                ma21_cond = ma50_cond = ma150_cond = ma_order_cond = False
+
+        st.markdown("---")
+        col_p1, col_p2 = st.columns(2)
+        with col_p1:
+            st.markdown("**価格条件**")
+            price_min = st.number_input(
+                "株価 最小値 ($)", value=10.0, step=1.0,
+                key=f"{tab_key}_price_min"
+            )
+        with col_p2:
+            st.markdown("**ファンダメンタル条件**")
+            enable_fundamental = st.checkbox(
+                "ファンダメンタル条件を有効にする", value=False,
+                key=f"{tab_key}_enable_fund"
+            )
+            if enable_fundamental:
+                fundamental_min = st.number_input(
+                    "ファンダメンタルスコア 最小値",
+                    min_value=0, max_value=10, value=5, step=1,
+                    key=f"{tab_key}_fund_min"
+                )
+            else:
+                fundamental_min = 0
+                st.info("ファンダメンタル条件は無効です。")
+
+        st.markdown("---")
+
+        # ── RS条件（CW / EW を横並び） ──────────────────────
+        st.subheader("📈 RS条件（CW・EW 両方）")
+        col_cw, col_ew = st.columns(2)
+
+        with col_cw:
+            st.markdown("**🔵 CW（時価総額加重）**")
+            enable_rs_cw = st.checkbox(
+                "CW RS条件を有効にする", value=True,
+                key=f"{tab_key}_enable_rs_cw"
+            )
+            if enable_rs_cw:
+                individual_rs_min = st.number_input(
+                    "Individual RS Percentile 最小値",
+                    value=80, step=1,
+                    key=f"{tab_key}_ind_rs_min"
+                )
+                sector_rs_cw_min = st.number_input(
+                    "Sector RS Pct CW 最小値",
+                    value=79, step=1,
+                    key=f"{tab_key}_sec_rs_cw_min"
+                )
+                industry_rs_cw_min = st.number_input(
+                    "Industry RS Pct CW 最小値",
+                    value=80, step=1,
+                    key=f"{tab_key}_ind_rs_cw_min"
+                )
+            else:
+                individual_rs_min = sector_rs_cw_min = industry_rs_cw_min = 0
+                st.info("CW RS条件は無効です。")
+
+        with col_ew:
+            st.markdown("**🟠 EW（等加重）**")
+            enable_rs_ew = st.checkbox(
+                "EW RS条件を有効にする", value=True,
+                key=f"{tab_key}_enable_rs_ew"
+            )
+            if enable_rs_ew:
+                # Individual RS は CW と共有（同一カラム）なので
+                # EW 側では Sector / Industry のみ設定
+                sector_rs_ew_min = st.number_input(
+                    "Sector RS Pct EW 最小値",
+                    value=79, step=1,
+                    key=f"{tab_key}_sec_rs_ew_min"
+                )
+                industry_rs_ew_min = st.number_input(
+                    "Industry RS Pct EW 最小値",
+                    value=80, step=1,
+                    key=f"{tab_key}_ind_rs_ew_min"
+                )
+            else:
+                sector_rs_ew_min = industry_rs_ew_min = 0
+                st.info("EW RS条件は無効です。")
+
+        # 設定サマリー
+        st.markdown("---")
+        st.markdown("**📋 現在の設定:**")
+        lines = [
+            f"テクニカル条件: {'✅ 有効' if enable_technical else '❌ 無効'}",
+        ]
+        if enable_technical:
+            lines += [
+                f"  - ATR: {atr_min}% ~ {atr_max}%",
+                f"  - ADR: {adr_min}% 以上",
+                f"  - MA21条件: {'✅' if ma21_cond else '❌'}",
+                f"  - MA50条件: {'✅' if ma50_cond else '❌'}",
+                f"  - MA150条件: {'✅' if ma150_cond else '❌'}",
+                f"  - MA順列: {'✅' if ma_order_cond else '❌'}",
+            ]
+        lines.append(f"価格: ${price_min} 以上")
+        lines.append(
+            f"ファンダメンタル: {'✅ 有効' if enable_fundamental else '❌ 無効'}"
+            + (f"  ({fundamental_min}点以上)" if enable_fundamental else "")
+        )
+        lines.append(
+            f"CW RS条件: {'✅ 有効' if enable_rs_cw else '❌ 無効'}"
+        )
+        if enable_rs_cw:
+            lines += [
+                f"  - 個別RS: {individual_rs_min}% 以上",
+                f"  - セクターRS CW: {sector_rs_cw_min}% 以上",
+                f"  - 業種RS CW: {industry_rs_cw_min}% 以上",
+            ]
+        lines.append(
+            f"EW RS条件: {'✅ 有効' if enable_rs_ew else '❌ 無効'}"
+        )
+        if enable_rs_ew:
+            lines += [
+                f"  - セクターRS EW: {sector_rs_ew_min}% 以上",
+                f"  - 業種RS EW: {industry_rs_ew_min}% 以上",
+            ]
+        st.info("\n".join(lines))
+
+    # ── フィルタリング実行 ────────────────────────────────
+    filtered = stock_df.copy()
+
+    if enable_technical:
+        if 'ATR_Pct_from_MA50' in filtered.columns:
+            filtered = filtered[
+                (filtered['ATR_Pct_from_MA50'] >= atr_min) &
+                (filtered['ATR_Pct_from_MA50'] <= atr_max)
+            ]
+        if 'ADR' in filtered.columns:
+            filtered = filtered[filtered['ADR'] >= adr_min]
+        if ma21_cond and {'MA21', 'Current_Price'}.issubset(filtered.columns):
+            filtered = filtered[filtered['Current_Price'] > filtered['MA21']]
+        if ma50_cond and {'MA50', 'Current_Price'}.issubset(filtered.columns):
+            filtered = filtered[filtered['Current_Price'] > filtered['MA50']]
+        if ma150_cond and {'MA150', 'Current_Price'}.issubset(filtered.columns):
+            filtered = filtered[filtered['Current_Price'] > filtered['MA150']]
+        if ma_order_cond and {'MA21', 'MA50', 'MA150'}.issubset(filtered.columns):
+            filtered = filtered[
+                (filtered['MA21'] > filtered['MA50']) &
+                (filtered['MA50'] > filtered['MA150'])
+            ]
+
+    if 'Current_Price' in filtered.columns:
+        filtered = filtered[filtered['Current_Price'] >= price_min]
+
+    if enable_fundamental and 'Fundamental_Score' in filtered.columns:
+        filtered = filtered[filtered['Fundamental_Score'] >= fundamental_min]
+
+    # CW RS条件
+    if enable_rs_cw:
+        if 'Individual_RS_Percentile' in filtered.columns:
+            filtered = filtered[
+                filtered['Individual_RS_Percentile'] >= individual_rs_min
+            ]
+        if 'Sector_RS_Pct_CW' in filtered.columns:
+            filtered = filtered[filtered['Sector_RS_Pct_CW'] >= sector_rs_cw_min]
+        if 'Industry_RS_Pct_CW' in filtered.columns:
+            filtered = filtered[filtered['Industry_RS_Pct_CW'] >= industry_rs_cw_min]
+
+    # EW RS条件
+    if enable_rs_ew:
+        if 'Sector_RS_Pct_EW' in filtered.columns:
+            filtered = filtered[filtered['Sector_RS_Pct_EW'] >= sector_rs_ew_min]
+        if 'Industry_RS_Pct_EW' in filtered.columns:
+            filtered = filtered[filtered['Industry_RS_Pct_EW'] >= industry_rs_ew_min]
+
+    # ── 結果表示 ──────────────────────────────────────────
+    st.markdown("---")
+    st.subheader(f"🚀 フィルタリング結果: {len(filtered)} 銘柄")
+
+    if len(filtered) == 0:
+        st.warning("⚠️ 条件に合致する銘柄がありません。条件を緩和してください。")
+        return
+
+    # CW / EW 両方のカラムを並べて表示
+    display_cols_ordered = [
+        'Symbol', 'Company Name', 'Sector', 'Industry',
+        'Screening_Score', 'Technical_Score', 'Fundamental_Score',
+        'RS_Score', 'Individual_RS_Percentile',
+        'Sector_RS_Pct_CW',  'Sector_RS_Pct_EW',
+        'Industry_RS_Pct_CW', 'Industry_RS_Pct_EW',
         'Current_Price', 'MA21', 'MA50', 'MA150',
         'ATR_Pct_from_MA50', 'ADR',
     ]
@@ -660,7 +992,7 @@ def render_momentum_tab(
             label="📥 CSVダウンロード（全データ）",
             data=csv,
             file_name=(
-                f"momentum_{rs_mode.lower()}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                f"momentum_both_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
             ),
             mime='text/csv',
             key=f"{tab_key}_dl_csv",
@@ -675,7 +1007,7 @@ def render_momentum_tab(
                 label="📝 Symbolリスト（TXT）",
                 data=','.join(syms),
                 file_name=(
-                    f"momentum_symbols_{rs_mode.lower()}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+                    f"momentum_symbols_both_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
                 ),
                 mime='text/plain',
                 key=f"{tab_key}_dl_txt",
@@ -764,6 +1096,7 @@ st.caption(f"📅 {selected_month} のデータ: {len(month_data)} 日分")
     tab_ind_compare,
     tab_momentum_cw,
     tab_momentum_ew,
+    tab_momentum_both,   # ★ 新規
 ) = st.tabs([
     "📈 セクター CW",
     "⚖️ セクター EW",
@@ -773,6 +1106,7 @@ st.caption(f"📅 {selected_month} のデータ: {len(month_data)} 日分")
     "🔀 インダストリー CW/EW 比較",
     "🚀 モメンタム銘柄 CW",
     "⚖️ モメンタム銘柄 EW",
+    "🎯 モメンタム銘柄 CW＋EW",  # ★
 ])
 
 # ---- セクター CW ----------------------------------------
@@ -941,6 +1275,21 @@ with tab_momentum_ew:
         display_date=latest_disp_date,
         rs_mode='EW',
         tab_key='mom_ew',
+    )
+
+# ---- モメンタム銘柄 CW＋EW（★ 新規） -------------------
+with tab_momentum_both:
+    st.header("🎯 モメンタム銘柄スクリーニング（CW＋EW 両条件）")
+    st.info(
+        "💡 **CW＋EW モード**: 時価総額加重（CW）と等加重（EW）の"
+        "両方のRS条件を同時に満たす銘柄を抽出します。"
+        " 大型株・中小型株いずれの視点でも強いセクター・インダストリーに属する"
+        "銘柄を厳選したい場合に活用してください。"
+    )
+    render_momentum_tab_both(
+        stock_df=latest_stock_df,
+        display_date=latest_disp_date,
+        tab_key='mom_both',
     )
 
 gc.collect()
