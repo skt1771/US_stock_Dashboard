@@ -853,24 +853,29 @@ def render_momentum_tab_both(
 
         st.markdown("---")
 
-        # ── バイプレッシャー条件（項目ごとに個別チェック）★ ──
+        # ── バイプレッシャー条件（項目ごとに個別チェック）────
         st.subheader("💹 バイプレッシャー条件")
         st.caption("各項目ごとにON/OFFを切り替えられます。")
 
-        # BP項目の定義: (カラム名, 表示ラベル, チェックキー, 値キー)
+        # ★ デフォルト値をカテゴリ別に設定
+        #   col_name, label, chk_key, val_key, default_val
         bp_items = [
-            ('BP_Stock',       'BP_Stock',       f"{tab_key}_chk_bp_stock",    f"{tab_key}_val_bp_stock"),
-            ('BP_Sector_CW',   'BP_Sector_CW',   f"{tab_key}_chk_bp_sec_cw",  f"{tab_key}_val_bp_sec_cw"),
-            ('BP_Sector_EW',   'BP_Sector_EW',   f"{tab_key}_chk_bp_sec_ew",  f"{tab_key}_val_bp_sec_ew"),
-            ('BP_Industry_CW', 'BP_Industry_CW', f"{tab_key}_chk_bp_ind_cw",  f"{tab_key}_val_bp_ind_cw"),
-            ('BP_Industry_EW', 'BP_Industry_EW', f"{tab_key}_chk_bp_ind_ew",  f"{tab_key}_val_bp_ind_ew"),
+            ('BP_Stock',       'BP_Stock',
+             f"{tab_key}_chk_bp_stock",   f"{tab_key}_val_bp_stock",   0.60),  # ★ Stock: 0.60
+            ('BP_Sector_CW',   'BP_Sector_CW',
+             f"{tab_key}_chk_bp_sec_cw",  f"{tab_key}_val_bp_sec_cw",  0.50),  # ★ Sector: 0.50
+            ('BP_Sector_EW',   'BP_Sector_EW',
+             f"{tab_key}_chk_bp_sec_ew",  f"{tab_key}_val_bp_sec_ew",  0.50),  # ★ Sector: 0.50
+            ('BP_Industry_CW', 'BP_Industry_CW',
+             f"{tab_key}_chk_bp_ind_cw",  f"{tab_key}_val_bp_ind_cw",  0.55),  # ★ Industry: 0.55
+            ('BP_Industry_EW', 'BP_Industry_EW',
+             f"{tab_key}_chk_bp_ind_ew",  f"{tab_key}_val_bp_ind_ew",  0.55),  # ★ Industry: 0.55
         ]
 
         bp_settings = {}  # {col_name: (enabled, min_val)}
 
         col_bp1, col_bp2 = st.columns(2)
-        for i, (col_name, label, chk_key, val_key) in enumerate(bp_items):
-            # 左右カラムに交互に配置
+        for i, (col_name, label, chk_key, val_key, default_val) in enumerate(bp_items):
             target_col = col_bp1 if i % 2 == 0 else col_bp2
             with target_col:
                 enabled = st.checkbox(
@@ -881,7 +886,8 @@ def render_momentum_tab_both(
                 if enabled:
                     min_val = st.number_input(
                         f"{label} 最小値",
-                        value=0.6, step=0.05, format="%.2f",
+                        value=default_val,          # ★ カテゴリ別デフォルト値
+                        step=0.05, format="%.2f",
                         key=val_key,
                     )
                 else:
@@ -928,7 +934,7 @@ def render_momentum_tab_both(
         lines.append("バイプレッシャー条件:")
         for col_name, (enabled, min_val) in bp_settings.items():
             lines.append(
-                f"  - {col_name}: {'✅ ' + str(min_val) + ' 以上' if enabled else '❌ 無効'}"
+                f"  - {col_name}: {'✅ ' + f'{min_val:.2f}' + ' 以上' if enabled else '❌ 無効'}"
             )
         st.info("\n".join(lines))
 
@@ -964,7 +970,6 @@ def render_momentum_tab_both(
     if enable_fundamental and 'Fundamental_Score' in filtered.columns:
         filtered = filtered[filtered['Fundamental_Score'] >= fundamental_min]
 
-    # CW RS条件
     if enable_rs_cw:
         if 'Individual_RS_Percentile' in filtered.columns:
             filtered = filtered[
@@ -975,14 +980,13 @@ def render_momentum_tab_both(
         if 'Industry_RS_Pct_CW' in filtered.columns:
             filtered = filtered[filtered['Industry_RS_Pct_CW'] >= industry_rs_cw_min]
 
-    # EW RS条件
     if enable_rs_ew:
         if 'Sector_RS_Pct_EW' in filtered.columns:
             filtered = filtered[filtered['Sector_RS_Pct_EW'] >= sector_rs_ew_min]
         if 'Industry_RS_Pct_EW' in filtered.columns:
             filtered = filtered[filtered['Industry_RS_Pct_EW'] >= industry_rs_ew_min]
 
-    # ★ バイプレッシャー条件（項目ごとに個別適用）
+    # バイプレッシャー条件（項目ごとに個別適用）
     for col_name, (enabled, min_val) in bp_settings.items():
         if enabled and col_name in filtered.columns:
             filtered = filtered[filtered[col_name] >= min_val]
@@ -1022,7 +1026,6 @@ def render_momentum_tab_both(
         hide_index=True,
     )
 
-    # ── 統計サマリー ──────────────────────────────────────
     with st.expander("📊 フィルタリング結果の統計"):
         c1, c2, c3, c4 = st.columns(4)
         with c1:
@@ -1044,7 +1047,6 @@ def render_momentum_tab_both(
             st.markdown("**セクター分布:**")
             st.bar_chart(filtered['Sector'].value_counts())
 
-    # ── ダウンロード ──────────────────────────────────────
     dl1, dl2 = st.columns(2)
     with dl1:
         csv = filtered[display_cols].to_csv(index=False).encode('utf-8')
@@ -1073,7 +1075,6 @@ def render_momentum_tab_both(
                 key=f"{tab_key}_dl_txt",
             )
 
-    # ── TradingView 用コピー ──────────────────────────────
     if 'Symbol' in filtered.columns:
         with st.expander("📌 Symbolリスト表示（TradingView用）"):
             syms = (
