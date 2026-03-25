@@ -160,6 +160,10 @@ def load_all_data(data_folder: str = DATA_FOLDER) -> list:
                         'Current_Price', 'MA21', 'MA50', 'MA150',
                         'ATR_Pct_from_MA50', 'ADR',
                         'sales_accel_3_qtrs', 'eps_accel_3_qtrs',
+                        # ★ BP カラム追加
+                        'BP_Stock',
+                        'BP_Sector_CW', 'BP_Sector_EW',
+                        'BP_Industry_CW', 'BP_Industry_EW',
                     ]
 
                     raw_all = excel.parse('Screening_Results')
@@ -737,16 +741,16 @@ def render_momentum_tab_both(
                 st.markdown("---")
                 st.markdown("**ADR条件**")
                 adr_min = st.number_input(
-                    "ADR 最小値 (%)", value=2.5, step=0.1,   # ★ 修正
+                    "ADR 最小値 (%)", value=2.5, step=0.1,
                     key=f"{tab_key}_adr_min"
                 )
                 adr_max = st.number_input(
-                    "ADR 最大値 (%)", value=5.5, step=0.1,   # ★ 新規追加
+                    "ADR 最大値 (%)", value=5.5, step=0.1,
                     key=f"{tab_key}_adr_max"
                 )
             else:
                 atr_min = atr_max = adr_min = 0.0
-                adr_max = float('inf')             # ★ 無効時は上限なし
+                adr_max = float('inf')
                 st.info("テクニカル条件は無効です。")
 
         with col_t2:
@@ -848,6 +852,43 @@ def render_momentum_tab_both(
                 sector_rs_ew_min = industry_rs_ew_min = 0
                 st.info("EW RS条件は無効です。")
 
+        st.markdown("---")
+
+        # ── バイプレッシャー条件 ★ 新規 ─────────────────────
+        st.subheader("💹 バイプレッシャー条件")
+        enable_bp = st.checkbox(
+            "バイプレッシャー条件を有効にする", value=True,
+            key=f"{tab_key}_enable_bp"
+        )
+        if enable_bp:
+            col_bp1, col_bp2 = st.columns(2)
+            with col_bp1:
+                bp_stock_min = st.number_input(
+                    "BP_Stock 最小値", value=0.6, step=0.05,
+                    format="%.2f", key=f"{tab_key}_bp_stock_min"
+                )
+                bp_sector_cw_min = st.number_input(
+                    "BP_Sector_CW 最小値", value=0.6, step=0.05,
+                    format="%.2f", key=f"{tab_key}_bp_sec_cw_min"
+                )
+                bp_sector_ew_min = st.number_input(
+                    "BP_Sector_EW 最小値", value=0.6, step=0.05,
+                    format="%.2f", key=f"{tab_key}_bp_sec_ew_min"
+                )
+            with col_bp2:
+                bp_industry_cw_min = st.number_input(
+                    "BP_Industry_CW 最小値", value=0.6, step=0.05,
+                    format="%.2f", key=f"{tab_key}_bp_ind_cw_min"
+                )
+                bp_industry_ew_min = st.number_input(
+                    "BP_Industry_EW 最小値", value=0.6, step=0.05,
+                    format="%.2f", key=f"{tab_key}_bp_ind_ew_min"
+                )
+        else:
+            bp_stock_min = bp_sector_cw_min = bp_sector_ew_min = 0.0
+            bp_industry_cw_min = bp_industry_ew_min = 0.0
+            st.info("バイプレッシャー条件は無効です。")
+
         # 設定サマリー
         st.markdown("---")
         st.markdown("**📋 現在の設定:**")
@@ -857,7 +898,7 @@ def render_momentum_tab_both(
         if enable_technical:
             lines += [
                 f"  - ATR: {atr_min}% ~ {atr_max}%",
-                f"  - ADR: {adr_min}% ~ {adr_max}%",   # ★ 上限追記
+                f"  - ADR: {adr_min}% ~ {adr_max}%",
                 f"  - MA21条件: {'✅' if ma21_cond else '❌'}",
                 f"  - MA50条件: {'✅' if ma50_cond else '❌'}",
                 f"  - MA150条件: {'✅' if ma150_cond else '❌'}",
@@ -885,6 +926,17 @@ def render_momentum_tab_both(
                 f"  - セクターRS EW: {sector_rs_ew_min}% 以上",
                 f"  - 業種RS EW: {industry_rs_ew_min}% 以上",
             ]
+        lines.append(
+            f"バイプレッシャー条件: {'✅ 有効' if enable_bp else '❌ 無効'}"
+        )
+        if enable_bp:
+            lines += [
+                f"  - BP_Stock: {bp_stock_min:.2f} 以上",
+                f"  - BP_Sector_CW: {bp_sector_cw_min:.2f} 以上",
+                f"  - BP_Sector_EW: {bp_sector_ew_min:.2f} 以上",
+                f"  - BP_Industry_CW: {bp_industry_cw_min:.2f} 以上",
+                f"  - BP_Industry_EW: {bp_industry_ew_min:.2f} 以上",
+            ]
         st.info("\n".join(lines))
 
     # ── フィルタリング実行 ────────────────────────────────
@@ -899,7 +951,7 @@ def render_momentum_tab_both(
         if 'ADR' in filtered.columns:
             filtered = filtered[
                 (filtered['ADR'] >= adr_min) &
-                (filtered['ADR'] <= adr_max)             # ★ 上限追加
+                (filtered['ADR'] <= adr_max)
             ]
         if ma21_cond and {'MA21', 'Current_Price'}.issubset(filtered.columns):
             filtered = filtered[filtered['Current_Price'] > filtered['MA21']]
@@ -937,6 +989,19 @@ def render_momentum_tab_both(
         if 'Industry_RS_Pct_EW' in filtered.columns:
             filtered = filtered[filtered['Industry_RS_Pct_EW'] >= industry_rs_ew_min]
 
+    # ★ バイプレッシャー条件
+    if enable_bp:
+        if 'BP_Stock' in filtered.columns:
+            filtered = filtered[filtered['BP_Stock'] >= bp_stock_min]
+        if 'BP_Sector_CW' in filtered.columns:
+            filtered = filtered[filtered['BP_Sector_CW'] >= bp_sector_cw_min]
+        if 'BP_Sector_EW' in filtered.columns:
+            filtered = filtered[filtered['BP_Sector_EW'] >= bp_sector_ew_min]
+        if 'BP_Industry_CW' in filtered.columns:
+            filtered = filtered[filtered['BP_Industry_CW'] >= bp_industry_cw_min]
+        if 'BP_Industry_EW' in filtered.columns:
+            filtered = filtered[filtered['BP_Industry_EW'] >= bp_industry_ew_min]
+
     # ── 結果表示 ──────────────────────────────────────────
     st.markdown("---")
     st.subheader(f"🚀 フィルタリング結果: {len(filtered)} 銘柄")
@@ -953,6 +1018,10 @@ def render_momentum_tab_both(
         'Industry_RS_Pct_CW', 'Industry_RS_Pct_EW',
         'Current_Price', 'MA21', 'MA50', 'MA150',
         'ATR_Pct_from_MA50', 'ADR',
+        # ★ BP カラムも表示
+        'BP_Stock',
+        'BP_Sector_CW', 'BP_Sector_EW',
+        'BP_Industry_CW', 'BP_Industry_EW',
     ]
     display_cols = [c for c in display_cols_ordered if c in filtered.columns]
 
