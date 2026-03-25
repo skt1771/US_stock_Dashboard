@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import os
 import glob
 import gc
+import re
 
 st.set_page_config(page_title="米国株RSダッシュボード", page_icon="📈", layout="wide")
 DATA_FOLDER = "data"
@@ -48,17 +49,27 @@ def load_all_data(folder=DATA_FOLDER):
     all_data = []
     if not os.path.exists(folder):
         st.error(f"フォルダが見つかりません: {folder}"); return all_data
-    files = sorted(glob.glob(os.path.join(folder,"*.xlsx")) +
-                   glob.glob(os.path.join(folder,"*.xls")))
+    files = sorted(
+        glob.glob(os.path.join(folder, "*.xlsx")) +
+        glob.glob(os.path.join(folder, "*.xls"))
+    )
     if not files:
         st.warning(f"{folder} にExcelファイルが見つかりません。"); return all_data
 
-    progress = st.progress(0); ph = st.empty()
+    progress = st.progress(0)
+    ph = st.empty()
+
     for idx, fp in enumerate(files):
         fn = os.path.basename(fp)
         ph.text(f"読み込み中: {fn} ({idx+1}/{len(files)})")
         try:
-            date_str = fn.replace(".xlsx","").replace(".xls","")
+            # ── ファイル名から YYYYMMDD を正規表現で抽出 ──────────────────
+            match = re.search(r'(\d{8})', fn)
+            if not match:
+                st.warning(f"{fn}: ファイル名に8桁の日付が見つかりません。スキップします。")
+                progress.progress((idx+1)/len(files))
+                continue
+            date_str  = match.group(1)                          # 例: "20260321"
             file_date = datetime.strptime(date_str, "%Y%m%d")
             display_date = get_display_date(file_date)
 
@@ -89,7 +100,7 @@ def load_all_data(folder=DATA_FOLDER):
             ]
             for sname in ["Screening_Results","ScreeningResults","Stock_Data","stock_data"]:
                 if sname in xl.sheet_names:
-                    raw = xl.parse(sname)
+                    raw   = xl.parse(sname)
                     avail = [c for c in stock_cols if c in raw.columns]
                     stock_df = raw[avail].copy(); break
 
@@ -100,17 +111,20 @@ def load_all_data(folder=DATA_FOLDER):
                     market_summary = xl.parse(sname); break
 
             all_data.append({
-                'date': file_date,
-                'display_date': display_date,
-                'filename': fn,
-                'sector_df': sector_df,
-                'industry_df': industry_df,
-                'stock_df': stock_df,
+                'date':           file_date,
+                'display_date':   display_date,
+                'filename':       fn,
+                'sector_df':      sector_df,
+                'industry_df':    industry_df,
+                'stock_df':       stock_df,
                 'market_summary': market_summary,
             })
+
         except Exception as e:
             st.warning(f"{fn} の読み込みに失敗: {e}")
+
         progress.progress((idx+1)/len(files))
+
     progress.empty(); ph.empty(); gc.collect()
     return all_data
 
@@ -126,11 +140,11 @@ def build_sector_heatmap(month_data, rs_col, title):
         frames.append(tmp)
     if not frames: return None
     merged = pd.concat(frames)
-    pivot = merged.pivot_table(index='Sector', columns='date', values=rs_col)
-    pivot = pivot.sort_values(by=pivot.columns[-1], ascending=False)
-    dates = [d.strftime('%m/%d') for d in pivot.columns]
-    z = pivot.values
-    text = [[f"{v:.1f}" if not pd.isna(v) else "" for v in row] for row in z]
+    pivot  = merged.pivot_table(index='Sector', columns='date', values=rs_col)
+    pivot  = pivot.sort_values(by=pivot.columns[-1], ascending=False)
+    dates  = [d.strftime('%m/%d') for d in pivot.columns]
+    z      = pivot.values
+    text   = [[f"{v:.1f}" if not pd.isna(v) else "" for v in row] for row in z]
     fig = go.Figure(go.Heatmap(
         z=z, x=dates, y=pivot.index.tolist(),
         text=text, texttemplate="%{text}",
@@ -153,11 +167,11 @@ def build_industry_heatmap(month_data, rs_col, title):
         frames.append(tmp)
     if not frames: return None
     merged = pd.concat(frames)
-    pivot = merged.pivot_table(index='Industry', columns='date', values=rs_col)
-    pivot = pivot.sort_values(by=pivot.columns[-1], ascending=False)
-    dates = [d.strftime('%m/%d') for d in pivot.columns]
-    z = pivot.values
-    text = [[f"{v:.1f}" if not pd.isna(v) else "" for v in row] for row in z]
+    pivot  = merged.pivot_table(index='Industry', columns='date', values=rs_col)
+    pivot  = pivot.sort_values(by=pivot.columns[-1], ascending=False)
+    dates  = [d.strftime('%m/%d') for d in pivot.columns]
+    z      = pivot.values
+    text   = [[f"{v:.1f}" if not pd.isna(v) else "" for v in row] for row in z]
     fig = go.Figure(go.Heatmap(
         z=z, x=dates, y=pivot.index.tolist(),
         text=text, texttemplate="%{text}",
@@ -172,37 +186,41 @@ def build_industry_heatmap(month_data, rs_col, title):
 # ── Comparison table builders ─────────────────────────────────────────────────
 def build_latest_sector_table(all_data):
     if len(all_data) < 1: return None
-    latest = all_data[-1]; prev = all_data[-2] if len(all_data)>=2 else None
-    df = latest.get('sector_df')
+    latest = all_data[-1]
+    prev   = all_data[-2] if len(all_data) >= 2 else None
+    df     = latest.get('sector_df')
     if df is None: return None
     rs_cols = [c for c in ['RS_CW','RS_EW','Sector_RS_CW','Sector_RS_EW'] if c in df.columns]
     if not rs_cols: return None
-    result = df[['Sector']+rs_cols].copy()
+    result = df[['Sector'] + rs_cols].copy()
     if prev is not None:
         pdf = prev.get('sector_df')
         if pdf is not None:
             for c in rs_cols:
                 if c in pdf.columns:
-                    merged = result.merge(pdf[['Sector',c]].rename(columns={c:c+'_prev'}),
-                                         on='Sector', how='left')
+                    merged = result.merge(
+                        pdf[['Sector', c]].rename(columns={c: c+'_prev'}),
+                        on='Sector', how='left')
                     result[c+'_diff'] = (merged[c] - merged[c+'_prev']).round(1)
     return result
 
 def build_latest_industry_table(all_data):
     if len(all_data) < 1: return None
-    latest = all_data[-1]; prev = all_data[-2] if len(all_data)>=2 else None
-    df = latest.get('industry_df')
+    latest = all_data[-1]
+    prev   = all_data[-2] if len(all_data) >= 2 else None
+    df     = latest.get('industry_df')
     if df is None: return None
     rs_cols = [c for c in ['RS_CW','RS_EW','Industry_RS_CW','Industry_RS_EW'] if c in df.columns]
     if not rs_cols: return None
-    result = df[['Industry']+rs_cols].copy()
+    result = df[['Industry'] + rs_cols].copy()
     if prev is not None:
         pdf = prev.get('industry_df')
         if pdf is not None:
             for c in rs_cols:
                 if c in pdf.columns:
-                    merged = result.merge(pdf[['Industry',c]].rename(columns={c:c+'_prev'}),
-                                          on='Industry', how='left')
+                    merged = result.merge(
+                        pdf[['Industry', c]].rename(columns={c: c+'_prev'}),
+                        on='Industry', how='left')
                     result[c+'_diff'] = (merged[c] - merged[c+'_prev']).round(1)
     return result
 
@@ -218,13 +236,12 @@ def render_momentum_tab(stock_df, display_date, rs_mode='CW', tab_key='mom_cw'):
     st.caption(f"データ基準日: {display_date}　｜　銘柄数: {len(stock_df):,}")
 
     with st.expander("🔧 フィルター設定", expanded=True):
-        # Technical
         st.subheader("テクニカル条件")
         enable_technical = st.checkbox("テクニカル条件を有効にする", value=True, key=f"{tab_key}_tech")
         c1,c2,c3,c4 = st.columns(4)
-        atr_min   = c1.number_input("ATR from 50MA 最小(%)", value=2.0, step=0.1, key=f"{tab_key}_atr_min")
-        atr_max   = c2.number_input("ATR from 50MA 最大(%)", value=5.0, step=0.1, key=f"{tab_key}_atr_max")
-        adr_min   = c3.number_input("ADR 最小(%)", value=4.0, step=0.1, key=f"{tab_key}_adr_min")
+        atr_min  = c1.number_input("ATR from 50MA 最小(%)", value=2.0, step=0.1, key=f"{tab_key}_atr_min")
+        atr_max  = c2.number_input("ATR from 50MA 最大(%)", value=5.0, step=0.1, key=f"{tab_key}_atr_max")
+        adr_min  = c3.number_input("ADR 最小(%)",           value=4.0, step=0.1, key=f"{tab_key}_adr_min")
         enable_ma = c4.checkbox("MA条件を有効にする", value=True, key=f"{tab_key}_ma")
         if enable_ma:
             cm1,cm2,cm3 = st.columns(3)
@@ -235,17 +252,14 @@ def render_momentum_tab(stock_df, display_date, rs_mode='CW', tab_key='mom_cw'):
         else:
             above_ma21=above_ma50=above_ma150=ma_order=False
 
-        # Price
         st.subheader("価格条件")
         enable_price = st.checkbox("価格条件を有効にする", value=True, key=f"{tab_key}_price")
         price_min = st.number_input("最低株価($)", value=10.0, step=1.0, key=f"{tab_key}_pmin")
 
-        # Fundamental
         st.subheader("ファンダメンタル条件")
         enable_fund = st.checkbox("ファンダメンタル条件を有効にする", value=False, key=f"{tab_key}_fund")
         fund_min = st.number_input("Fundamental Score 最小", value=5, step=1, key=f"{tab_key}_fmin")
 
-        # RS
         st.subheader(f"RS条件（{rs_mode}）")
         enable_rs = st.checkbox("RS条件を有効にする", value=True, key=f"{tab_key}_rs")
         cr1,cr2,cr3 = st.columns(3)
@@ -253,7 +267,6 @@ def render_momentum_tab(stock_df, display_date, rs_mode='CW', tab_key='mom_cw'):
         sector_rs_min     = cr2.number_input("Sector RS 最小(%)",     value=79, step=1, key=f"{tab_key}_rs_sec")
         industry_rs_min   = cr3.number_input("Industry RS 最小(%)",   value=80, step=1, key=f"{tab_key}_rs_ind2")
 
-    # Summary
     settings = []
     if enable_technical: settings.append(f"ATR:{atr_min}~{atr_max}% | ADR≥{adr_min}%")
     if enable_price:     settings.append(f"Price≥${price_min}")
@@ -261,7 +274,6 @@ def render_momentum_tab(stock_df, display_date, rs_mode='CW', tab_key='mom_cw'):
     if enable_rs:        settings.append(f"RS_Ind≥{individual_rs_min}% | RS_Sec≥{sector_rs_min}% | RS_Ind2≥{industry_rs_min}%")
     st.info("現在の条件: " + ("  /  ".join(settings) if settings else "なし"))
 
-    # Apply filters
     filtered = stock_df.copy()
     if enable_technical:
         if 'ATR_from_50MA' in filtered.columns:
@@ -297,14 +309,12 @@ def render_momentum_tab(stock_df, display_date, rs_mode='CW', tab_key='mom_cw'):
                                 'Price','ATR_from_50MA','ADR','Fundamental_Score']
                     if c in filtered.columns]
     sort_col = rs_ind if rs_ind in filtered.columns else display_cols[0]
-    sort_key = f"{tab_key}_sort"
     chosen_sort = st.selectbox("並び替え列", display_cols,
                                index=display_cols.index(sort_col) if sort_col in display_cols else 0,
-                               key=sort_key)
+                               key=f"{tab_key}_sort")
     result_df = filtered[display_cols].sort_values(chosen_sort, ascending=False)
     st.dataframe(result_df, use_container_width=True)
 
-    # Metrics
     mc1,mc2,mc3,mc4 = st.columns(4)
     mc1.metric("該当銘柄数", len(filtered))
     if rs_ind in filtered.columns:
@@ -314,7 +324,6 @@ def render_momentum_tab(stock_df, display_date, rs_mode='CW', tab_key='mom_cw'):
     if 'ATR_from_50MA' in filtered.columns:
         mc4.metric("平均 ATR", f"{filtered['ATR_from_50MA'].mean():.1f}%")
 
-    # Sector bar chart
     if 'Sector' in filtered.columns:
         sec_count = filtered['Sector'].value_counts().reset_index()
         sec_count.columns = ['Sector','Count']
@@ -323,23 +332,20 @@ def render_momentum_tab(stock_df, display_date, rs_mode='CW', tab_key='mom_cw'):
         fig.update_layout(title="セクター分布", xaxis_tickangle=-30, height=350)
         st.plotly_chart(fig, use_container_width=True)
 
-    # Downloads
     from datetime import datetime as _dt
     ts = _dt.now().strftime('%Y%m%d_%H%M%S')
     dl1,dl2 = st.columns(2)
     csv_bytes = result_df.to_csv(index=False).encode('utf-8-sig')
     dl1.download_button("📥 CSV ダウンロード", csv_bytes,
-                        f"momentum_{rs_mode.lower()}_{ts}.csv", "text/csv",
+                        f"momentum_{rs_mode.lower()}_{ts}.csv","text/csv",
                         key=f"{tab_key}_dl_csv")
     if 'Symbol' in result_df.columns:
         syms = result_df['Symbol'].dropna().tolist()
-        sym_txt = "\n".join(syms)
-        dl2.download_button("📋 Symbol リスト (.txt)", sym_txt.encode(),
-                            f"symbols_{rs_mode.lower()}_{ts}.txt", "text/plain",
+        dl2.download_button("📋 Symbol リスト (.txt)", "\n".join(syms).encode(),
+                            f"symbols_{rs_mode.lower()}_{ts}.txt","text/plain",
                             key=f"{tab_key}_dl_txt")
         st.subheader("TradingView 用 Symbol リスト")
-        tv_str = ",".join(syms)
-        st.code(tv_str, language="text")
+        st.code(",".join(syms), language="text")
 
 # ── CW+EW combined momentum tab ───────────────────────────────────────────────
 def render_momentum_tab_both(stock_df, display_date, tab_key='mom_both'):
@@ -388,20 +394,20 @@ def render_momentum_tab_both(stock_df, display_date, tab_key='mom_both'):
 
         with col_cw:
             st.markdown("**CW（時価総額加重）**")
-            individual_rs_min   = st.number_input("Individual RS 最小(%)",  value=80, step=1, key=f"{tab_key}_rs_ind")
-            sector_rs_cw_min    = st.number_input("Sector RS CW 最小(%)",   value=70, step=1, key=f"{tab_key}_rs_sec_cw")
-            industry_rs_cw_min  = st.number_input("Industry RS CW 最小(%)", value=70, step=1, key=f"{tab_key}_rs_ind_cw")
+            individual_rs_min  = st.number_input("Individual RS 最小(%)",  value=80, step=1, key=f"{tab_key}_rs_ind")
+            sector_rs_cw_min   = st.number_input("Sector RS CW 最小(%)",   value=70, step=1, key=f"{tab_key}_rs_sec_cw")
+            industry_rs_cw_min = st.number_input("Industry RS CW 最小(%)", value=70, step=1, key=f"{tab_key}_rs_ind_cw")
 
         with col_ew:
             st.markdown("**EW（均等加重）**")
-            sector_rs_ew_min    = st.number_input("Sector RS EW 最小(%)",   value=70, step=1, key=f"{tab_key}_rs_sec_ew")
-            industry_rs_ew_min  = st.number_input("Industry RS EW 最小(%)", value=70, step=1, key=f"{tab_key}_rs_ind_ew")
+            sector_rs_ew_min   = st.number_input("Sector RS EW 最小(%)",   value=70, step=1, key=f"{tab_key}_rs_sec_ew")
+            industry_rs_ew_min = st.number_input("Industry RS EW 最小(%)", value=70, step=1, key=f"{tab_key}_rs_ind_ew")
 
         # ── Buy Pressure ───────────────────────────────────────────────────────
         st.subheader("バイプレッシャー条件")
         enable_bp = st.checkbox("バイプレッシャー条件を有効にする", value=True, key=f"{tab_key}_bp_enable")
 
-        # bp_items: (column, label, default_min, has_max, default_max)
+        # (column, label, default_min, has_max, default_max)
         bp_items = [
             ("BP_Stock",       "BP_Stock",       0.60, True,  0.70),
             ("BP_Sector_CW",   "BP_Sector_CW",   0.50, False, None),
@@ -409,22 +415,26 @@ def render_momentum_tab_both(stock_df, display_date, tab_key='mom_both'):
             ("BP_Industry_CW", "BP_Industry_CW", 0.55, False, None),
             ("BP_Industry_EW", "BP_Industry_EW", 0.55, False, None),
         ]
-        bp_settings = {}  # col -> (enabled, min_val, max_val_or_None)
+        bp_settings = {}
 
         for col, label, def_min, has_max, def_max in bp_items:
             bp_col1, bp_col2, bp_col3 = st.columns([1, 1, 1])
-            enabled = bp_col1.checkbox(f"{label} を有効", value=True,
-                                       key=f"{tab_key}_bp_{col}_en",
-                                       disabled=not enable_bp)
-            min_val = bp_col2.number_input(f"{label} 最小値", value=def_min,
-                                           step=0.05, format="%.2f",
-                                           key=f"{tab_key}_bp_{col}_min",
-                                           disabled=not enable_bp)
+            enabled = bp_col1.checkbox(
+                f"{label} を有効", value=True,
+                key=f"{tab_key}_bp_{col}_en",
+                disabled=not enable_bp
+            )
+            min_val = bp_col2.number_input(
+                f"{label} 最小値", value=def_min, step=0.05, format="%.2f",
+                key=f"{tab_key}_bp_{col}_min",
+                disabled=not enable_bp
+            )
             if has_max:
-                max_val = bp_col3.number_input(f"{label} 最大値", value=def_max,
-                                               step=0.05, format="%.2f",
-                                               key=f"{tab_key}_bp_{col}_max",
-                                               disabled=not enable_bp)
+                max_val = bp_col3.number_input(
+                    f"{label} 最大値", value=def_max, step=0.05, format="%.2f",
+                    key=f"{tab_key}_bp_{col}_max",
+                    disabled=not enable_bp
+                )
             else:
                 max_val = None
 
@@ -434,8 +444,10 @@ def render_momentum_tab_both(stock_df, display_date, tab_key='mom_both'):
     settings = []
     if enable_technical:
         settings.append(f"ATR:{atr_min}~{atr_max}% | ADR:{adr_min}~{adr_max}%")
-    if enable_price:   settings.append(f"Price≥${price_min}")
-    if enable_fund:    settings.append(f"Fundamental≥{fund_min}")
+    if enable_price:
+        settings.append(f"Price≥${price_min}")
+    if enable_fund:
+        settings.append(f"Fundamental≥{fund_min}")
     if enable_rs:
         settings.append(
             f"RS_Ind≥{individual_rs_min}% | "
@@ -443,15 +455,15 @@ def render_momentum_tab_both(stock_df, display_date, tab_key='mom_both'):
             f"Sec_EW≥{sector_rs_ew_min}% | Ind_EW≥{industry_rs_ew_min}%"
         )
     if enable_bp:
-        bp_summary_parts = []
+        bp_parts = []
         for col, (en, mn, mx) in bp_settings.items():
             if en:
                 part = f"{col}≥{mn:.2f}"
                 if mx is not None:
                     part += f"~{mx:.2f}"
-                bp_summary_parts.append(part)
-        if bp_summary_parts:
-            settings.append("BP: " + " | ".join(bp_summary_parts))
+                bp_parts.append(part)
+        if bp_parts:
+            settings.append("BP: " + " | ".join(bp_parts))
     st.info("現在の条件: " + ("  /  ".join(settings) if settings else "なし"))
 
     # ── Apply filters ─────────────────────────────────────────────────────────
@@ -482,20 +494,17 @@ def render_momentum_tab_both(stock_df, display_date, tab_key='mom_both'):
         filtered = filtered[filtered['Fundamental_Score'] >= fund_min]
 
     if enable_rs:
-        cw_map = {
+        rs_thresholds = {
             'RS_Percentile_CW': individual_rs_min,
             'Sector_RS_CW':     sector_rs_cw_min,
             'Industry_RS_CW':   industry_rs_cw_min,
+            'Sector_RS_EW':     sector_rs_ew_min,
+            'Industry_RS_EW':   industry_rs_ew_min,
         }
-        ew_map = {
-            'Sector_RS_EW':   sector_rs_ew_min,
-            'Industry_RS_EW': industry_rs_ew_min,
-        }
-        for col, thr in {**cw_map, **ew_map}.items():
+        for col, thr in rs_thresholds.items():
             if col in filtered.columns:
                 filtered = filtered[filtered[col] >= thr]
 
-    # BP filters
     for col, (en, mn, mx) in bp_settings.items():
         if en and col in filtered.columns:
             filtered = filtered[filtered[col] >= mn]
@@ -522,19 +531,16 @@ def render_momentum_tab_both(stock_df, display_date, tab_key='mom_both'):
     result_df = filtered[display_cols].sort_values(chosen_sort, ascending=False)
     st.dataframe(result_df, use_container_width=True)
 
-    # Metrics
     mc1, mc2, mc3, mc4 = st.columns(4)
     mc1.metric("該当銘柄数", len(filtered))
-    for col, lbl in [('RS_Percentile_CW','平均 RS_CW'), ('RS_Percentile_EW','平均 RS_EW')]:
+    for col, lbl in [('RS_Percentile_CW','平均 RS_CW'),('RS_Percentile_EW','平均 RS_EW')]:
         if col in filtered.columns:
-            mc2.metric(lbl, f"{filtered[col].mean():.1f}%")
-            break
+            mc2.metric(lbl, f"{filtered[col].mean():.1f}%"); break
     if 'ADR' in filtered.columns:
         mc3.metric("平均 ADR", f"{filtered['ADR'].mean():.1f}%")
     if 'ATR_from_50MA' in filtered.columns:
         mc4.metric("平均 ATR", f"{filtered['ATR_from_50MA'].mean():.1f}%")
 
-    # Sector bar chart
     if 'Sector' in filtered.columns:
         sec_count = filtered['Sector'].value_counts().reset_index()
         sec_count.columns = ['Sector','Count']
@@ -543,18 +549,17 @@ def render_momentum_tab_both(stock_df, display_date, tab_key='mom_both'):
         fig.update_layout(title="セクター分布", xaxis_tickangle=-30, height=350)
         st.plotly_chart(fig, use_container_width=True)
 
-    # Downloads
     from datetime import datetime as _dt
     ts = _dt.now().strftime('%Y%m%d_%H%M%S')
     dl1, dl2 = st.columns(2)
     csv_bytes = result_df.to_csv(index=False).encode('utf-8-sig')
     dl1.download_button("📥 CSV ダウンロード", csv_bytes,
-                        f"momentum_both_{ts}.csv", "text/csv",
+                        f"momentum_both_{ts}.csv","text/csv",
                         key=f"{tab_key}_dl_csv")
     if 'Symbol' in result_df.columns:
         syms = result_df['Symbol'].dropna().tolist()
         dl2.download_button("📋 Symbol リスト (.txt)", "\n".join(syms).encode(),
-                            f"symbols_both_{ts}.txt", "text/plain",
+                            f"symbols_both_{ts}.txt","text/plain",
                             key=f"{tab_key}_dl_txt")
         st.subheader("TradingView 用 Symbol リスト")
         st.code(",".join(syms), language="text")
@@ -567,9 +572,9 @@ if not all_data:
     st.error("読み込めるデータがありません。"); st.stop()
 
 all_data.sort(key=lambda x: x['date'])
-latest          = all_data[-1]
-latest_stock_df = latest.get('stock_df')
-latest_disp_date= latest['display_date'].strftime('%Y年%m月%d日')
+latest           = all_data[-1]
+latest_stock_df  = latest.get('stock_df')
+latest_disp_date = latest['display_date'].strftime('%Y年%m月%d日')
 
 # Market summary banner
 ms = latest.get('market_summary')
@@ -600,77 +605,68 @@ tabs = st.tabs([
     "🌊 モメンタム銘柄 (EW)",
     "🎯 モメンタム銘柄 CW＋EW",
 ])
-tab_sec_cw, tab_sec_ew, tab_ind_cw, tab_ind_ew, \
-tab_sec_cmp, tab_ind_cmp, \
-tab_mom_cw, tab_mom_ew, tab_mom_both = tabs
+(tab_sec_cw, tab_sec_ew, tab_ind_cw, tab_ind_ew,
+ tab_sec_cmp, tab_ind_cmp,
+ tab_mom_cw, tab_mom_ew, tab_mom_both) = tabs
 
-# Sector CW heatmap
 with tab_sec_cw:
     st.header("セクター RS ヒートマップ（CW）")
     fig = build_sector_heatmap(month_data, 'RS_CW', f"セクター RS CW — {selected_month}")
     if fig: st.plotly_chart(fig, use_container_width=True)
     else:   st.warning("データがありません。")
 
-# Sector EW heatmap
 with tab_sec_ew:
     st.header("セクター RS ヒートマップ（EW）")
     fig = build_sector_heatmap(month_data, 'RS_EW', f"セクター RS EW — {selected_month}")
     if fig: st.plotly_chart(fig, use_container_width=True)
     else:   st.warning("データがありません。")
 
-# Industry CW heatmap
 with tab_ind_cw:
     st.header("業種 RS ヒートマップ（CW）")
     fig = build_industry_heatmap(month_data, 'RS_CW', f"業種 RS CW — {selected_month}")
     if fig: st.plotly_chart(fig, use_container_width=True)
     else:   st.warning("データがありません。")
 
-# Industry EW heatmap
 with tab_ind_ew:
     st.header("業種 RS ヒートマップ（EW）")
     fig = build_industry_heatmap(month_data, 'RS_EW', f"業種 RS EW — {selected_month}")
     if fig: st.plotly_chart(fig, use_container_width=True)
     else:   st.warning("データがありません。")
 
-# Sector comparison table
 with tab_sec_cmp:
     st.header("セクター RS 比較（最新 vs 前日）")
     tbl = build_latest_sector_table(all_data)
     if tbl is not None:
-        rs_cols  = [c for c in tbl.columns if 'RS' in c and 'diff' not in c]
-        diff_cols= [c for c in tbl.columns if 'diff' in c]
+        rs_cols   = [c for c in tbl.columns if 'RS' in c and 'diff' not in c]
+        diff_cols = [c for c in tbl.columns if 'diff' in c]
         styled = tbl.sort_values(rs_cols[0], ascending=False).style
-        for c in rs_cols:  styled = styled.apply(color_rs_col,   subset=[c])
-        for c in diff_cols:styled = styled.apply(color_diff_col, subset=[c])
+        for c in rs_cols:   styled = styled.apply(color_rs_col,   subset=[c])
+        for c in diff_cols: styled = styled.apply(color_diff_col, subset=[c])
         st.dataframe(styled, use_container_width=True)
     else:
         st.warning("データがありません。")
 
-# Industry comparison table
 with tab_ind_cmp:
     st.header("業種 RS 比較（最新 vs 前日）")
     tbl = build_latest_industry_table(all_data)
     if tbl is not None:
-        rs_cols  = [c for c in tbl.columns if 'RS' in c and 'diff' not in c]
-        diff_cols= [c for c in tbl.columns if 'diff' in c]
+        rs_cols   = [c for c in tbl.columns if 'RS' in c and 'diff' not in c]
+        diff_cols = [c for c in tbl.columns if 'diff' in c]
         styled = tbl.sort_values(rs_cols[0], ascending=False).style
-        for c in rs_cols:  styled = styled.apply(color_rs_col,   subset=[c])
-        for c in diff_cols:styled = styled.apply(color_diff_col, subset=[c])
+        for c in rs_cols:   styled = styled.apply(color_rs_col,   subset=[c])
+        for c in diff_cols: styled = styled.apply(color_diff_col, subset=[c])
         st.dataframe(styled, use_container_width=True)
     else:
         st.warning("データがありません。")
 
-# Momentum CW
 with tab_mom_cw:
     st.header("🚀 モメンタム銘柄スクリーニング（CWベース）")
     render_momentum_tab(latest_stock_df, latest_disp_date, rs_mode='CW', tab_key='mom_cw')
 
-# Momentum EW
 with tab_mom_ew:
     st.header("🌊 モメンタム銘柄スクリーニング（EWベース）")
     render_momentum_tab(latest_stock_df, latest_disp_date, rs_mode='EW', tab_key='mom_ew')
 
-# Momentum CW+EW
 with tab_mom_both:
     st.header("🎯 モメンタム銘柄スクリーニング（CW＋EW 両条件）")
     render_momentum_tab_both(latest_stock_df, latest_disp_date, tab_key='mom_both')
