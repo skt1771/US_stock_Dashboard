@@ -727,11 +727,11 @@ def render_momentum_tab_both(
             if enable_technical:
                 st.markdown("**ATR条件**")
                 atr_min = st.number_input(
-                    "ATR from MA50 最小値 (%)", value=1.5, step=0.1,  # ★ 修正
+                    "ATR from MA50 最小値 (%)", value=1.5, step=0.1,
                     key=f"{tab_key}_atr_min"
                 )
                 atr_max = st.number_input(
-                    "ATR from MA50 最大値 (%)", value=6.0, step=0.1,  # ★ 修正
+                    "ATR from MA50 最大値 (%)", value=6.0, step=0.1,
                     key=f"{tab_key}_atr_max"
                 )
                 adr_min = st.number_input(
@@ -803,17 +803,17 @@ def render_momentum_tab_both(
             if enable_rs_cw:
                 individual_rs_min = st.number_input(
                     "Individual RS Percentile 最小値",
-                    value=80, step=1,
+                    value=80, step=1,           # 変更なし
                     key=f"{tab_key}_ind_rs_min"
                 )
                 sector_rs_cw_min = st.number_input(
                     "Sector RS Pct CW 最小値",
-                    value=79, step=1,
+                    value=70, step=1,           # ★ 79→70
                     key=f"{tab_key}_sec_rs_cw_min"
                 )
                 industry_rs_cw_min = st.number_input(
                     "Industry RS Pct CW 最小値",
-                    value=80, step=1,
+                    value=70, step=1,           # ★ 80→70
                     key=f"{tab_key}_ind_rs_cw_min"
                 )
             else:
@@ -829,12 +829,12 @@ def render_momentum_tab_both(
             if enable_rs_ew:
                 sector_rs_ew_min = st.number_input(
                     "Sector RS Pct EW 最小値",
-                    value=79, step=1,
+                    value=70, step=1,           # ★ 79→70
                     key=f"{tab_key}_sec_rs_ew_min"
                 )
                 industry_rs_ew_min = st.number_input(
                     "Industry RS Pct EW 最小値",
-                    value=80, step=1,
+                    value=70, step=1,           # ★ 80→70
                     key=f"{tab_key}_ind_rs_ew_min"
                 )
             else:
