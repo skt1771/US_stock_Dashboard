@@ -870,14 +870,12 @@ def render_momentum_tab_both(
              f"{tab_key}_chk_bp_ind_ew",  f"{tab_key}_val_bp_ind_ew",  0.55),
         ]
 
-        # bp_settings: {col_name: (enabled_min, min_val, enabled_max, max_val)}
         bp_settings = {}
 
         col_bp1, col_bp2 = st.columns(2)
         for i, (col_name, label, chk_key, val_key, default_val) in enumerate(bp_items):
             target_col = col_bp1 if i % 2 == 0 else col_bp2
             with target_col:
-                # ── 最小値 ──
                 enabled_min = st.checkbox(
                     f"{label} 最小値を有効にする",
                     value=True,
@@ -893,17 +891,16 @@ def render_momentum_tab_both(
                 else:
                     min_val = 0.0
 
-                # ── 最大値（BP_Stock のみ追加、デフォルトOFF）──
                 if col_name == 'BP_Stock':
                     enabled_max = st.checkbox(
                         f"{label} 最大値を有効にする",
-                        value=False,                      # ★ デフォルトOFF
+                        value=False,
                         key=f"{tab_key}_chk_bp_stock_max",
                     )
                     if enabled_max:
                         max_val = st.number_input(
                             f"{label} 最大値",
-                            value=0.70,                   # ★ デフォルト 0.70
+                            value=0.70,
                             step=0.05, format="%.2f",
                             key=f"{tab_key}_val_bp_stock_max",
                         )
@@ -1010,7 +1007,6 @@ def render_momentum_tab_both(
         if 'Industry_RS_Pct_EW' in filtered.columns:
             filtered = filtered[filtered['Industry_RS_Pct_EW'] >= industry_rs_ew_min]
 
-    # ── バイプレッシャー条件（最小値・最大値を個別適用）──
     for col_name, (enabled_min, min_val, enabled_max, max_val) in bp_settings.items():
         if col_name not in filtered.columns:
             continue
@@ -1186,6 +1182,7 @@ st.caption(f"📅 {selected_month} のデータ: {len(month_data)} 日分")
     tab_momentum_cw,
     tab_momentum_ew,
     tab_momentum_both,
+    tab_industry_search,
 ) = st.tabs([
     "📈 セクター CW",
     "⚖️ セクター EW",
@@ -1196,6 +1193,7 @@ st.caption(f"📅 {selected_month} のデータ: {len(month_data)} 日分")
     "🚀 モメンタム銘柄 CW",
     "⚖️ モメンタム銘柄 EW",
     "🎯 モメンタム銘柄 CW＋EW",
+    "🔍 インダストリー銘柄検索",
 ])
 
 # ---- セクター CW ----------------------------------------
@@ -1380,5 +1378,194 @@ with tab_momentum_both:
         display_date=latest_disp_date,
         tab_key='mom_both',
     )
+
+# ---- インダストリー銘柄検索 ------------------------------
+with tab_industry_search:
+    st.header("🔍 インダストリー銘柄検索")
+    st.caption(
+        f"📅 データ日付: {latest_disp_date}　　"
+        f"対象銘柄数: {len(latest_stock_df):,} 銘柄"
+        if latest_stock_df is not None and not latest_stock_df.empty
+        else "📅 データなし"
+    )
+
+    if latest_stock_df is None or latest_stock_df.empty:
+        st.error("銘柄データが読み込めませんでした。")
+    else:
+        # ── Industry一覧を取得 ──────────────────────────
+        industry_list = sorted(
+            latest_stock_df['Industry'].dropna().unique().tolist()
+        ) if 'Industry' in latest_stock_df.columns else []
+
+        # ── 検索欄 ──────────────────────────────────────
+        search_query = st.text_input(
+            "🔍 Industry名を入力（部分一致）",
+            placeholder="例: Software, Semiconductor, Bank ...",
+            key="industry_search_query",
+        )
+
+        if search_query:
+            # ── 部分一致でIndustryを絞り込み ────────────
+            matched_industries = [
+                ind for ind in industry_list
+                if search_query.lower() in ind.lower()
+            ]
+
+            if not matched_industries:
+                st.warning(
+                    f"「{search_query}」に一致するIndustryが見つかりません。"
+                    " 別のキーワードをお試しください。"
+                )
+            else:
+                # ── マッチ件数に応じて選択UIを出し分け ──
+                if len(matched_industries) == 1:
+                    selected_industries = matched_industries
+                    st.success(
+                        f"✅ マッチしたIndustry: **{matched_industries[0]}**"
+                    )
+                else:
+                    st.info(
+                        f"📋 「{search_query}」に一致するIndustryが "
+                        f"**{len(matched_industries)}件** 見つかりました。"
+                        " 表示するIndustryを選択してください（複数選択可）。"
+                    )
+                    selected_industries = st.multiselect(
+                        "表示するIndustryを選択",
+                        options=matched_industries,
+                        default=matched_industries,
+                        key="industry_search_multiselect",
+                    )
+
+                if selected_industries:
+                    # ── 該当銘柄を絞り込み ───────────────
+                    result_df = latest_stock_df[
+                        latest_stock_df['Industry'].isin(selected_industries)
+                    ].copy()
+
+                    # ── 表示カラム ──────────────────────
+                    display_cols_ordered = [
+                        'Symbol', 'Company Name', 'Sector', 'Industry',
+                        'Screening_Score', 'Technical_Score', 'Fundamental_Score',
+                        'RS_Score', 'Individual_RS_Percentile',
+                        'Sector_RS_Pct_CW',  'Sector_RS_Pct_EW',
+                        'Industry_RS_Pct_CW', 'Industry_RS_Pct_EW',
+                        'Current_Price', 'MA21', 'MA50', 'MA150',
+                        'ATR_Pct_from_MA50', 'ADR',
+                        'BP_Stock',
+                        'BP_Sector_CW', 'BP_Sector_EW',
+                        'BP_Industry_CW', 'BP_Industry_EW',
+                    ]
+                    display_cols = [
+                        c for c in display_cols_ordered
+                        if c in result_df.columns
+                    ]
+
+                    sort_key = next(
+                        (c for c in [
+                            'Screening_Score', 'RS_Score',
+                            'Individual_RS_Percentile'
+                        ] if c in result_df.columns),
+                        display_cols[0],
+                    )
+
+                    st.subheader(
+                        f"📊 検索結果: {len(result_df)} 銘柄"
+                        f"（Industry: {', '.join(selected_industries)}）"
+                    )
+
+                    st.dataframe(
+                        result_df[display_cols].sort_values(
+                            sort_key, ascending=False
+                        ),
+                        use_container_width=True,
+                        height=600,
+                        hide_index=True,
+                    )
+
+                    # ── 統計 ────────────────────────────
+                    with st.expander("📊 検索結果の統計"):
+                        c1, c2, c3, c4 = st.columns(4)
+                        with c1:
+                            st.metric("銘柄数", len(result_df))
+                        with c2:
+                            if 'Screening_Score' in result_df.columns:
+                                st.metric(
+                                    "平均スコア",
+                                    f"{result_df['Screening_Score'].mean():.1f}"
+                                )
+                        with c3:
+                            if 'Individual_RS_Percentile' in result_df.columns:
+                                st.metric(
+                                    "平均個別RS",
+                                    f"{result_df['Individual_RS_Percentile'].mean():.1f}%"
+                                )
+                        with c4:
+                            if 'ADR' in result_df.columns:
+                                st.metric(
+                                    "平均ADR",
+                                    f"{result_df['ADR'].mean():.1f}%"
+                                )
+
+                    # ── ダウンロード ─────────────────────
+                    dl1, dl2 = st.columns(2)
+                    with dl1:
+                        csv = result_df[display_cols].to_csv(
+                            index=False
+                        ).encode('utf-8')
+                        st.download_button(
+                            label="📥 CSVダウンロード",
+                            data=csv,
+                            file_name=(
+                                f"industry_search_"
+                                f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                            ),
+                            mime='text/csv',
+                            key="industry_search_dl_csv",
+                        )
+                    with dl2:
+                        if 'Symbol' in result_df.columns:
+                            syms = (
+                                result_df.sort_values(sort_key, ascending=False)
+                                ['Symbol'].dropna().astype(str).tolist()
+                            )
+                            st.download_button(
+                                label="📝 Symbolリスト（TXT）",
+                                data=','.join(syms),
+                                file_name=(
+                                    f"industry_symbols_"
+                                    f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+                                ),
+                                mime='text/plain',
+                                key="industry_search_dl_txt",
+                            )
+
+                    # ── TradingView用Symbolリスト ────────
+                    if 'Symbol' in result_df.columns:
+                        with st.expander("📌 Symbolリスト表示（TradingView用）"):
+                            syms = (
+                                result_df.sort_values(sort_key, ascending=False)
+                                ['Symbol'].dropna().astype(str).tolist()
+                            )
+                            st.markdown("**カンマ区切り（コピー用）:**")
+                            st.code(','.join(syms), language=None)
+                            st.success(f"✅ 合計 {len(syms)} 銘柄")
+                            if len(syms) > 10:
+                                st.info(
+                                    f"📊 上位10銘柄: {', '.join(syms[:10])}"
+                                )
+
+        else:
+            # ── 未検索時はIndustry一覧のみ表示 ──────────
+            st.info(
+                f"💡 上の検索欄にIndustry名を入力すると該当銘柄を表示します。\n\n"
+                f"利用可能なIndustry数: **{len(industry_list)}件**"
+            )
+            with st.expander("📋 利用可能なIndustry一覧を表示する"):
+                st.dataframe(
+                    pd.DataFrame({'Industry': industry_list}),
+                    use_container_width=True,
+                    hide_index=True,
+                    height=400,
+                )
 
 gc.collect()
