@@ -247,10 +247,16 @@ def build_sector_heatmap(
 
     ts_df = pd.concat(records, ignore_index=True)
 
-    pivot_val  = ts_df.pivot_table(
+    pivot_val = ts_df.pivot_table(
         index='Sector', columns='Date', values=value_col, aggfunc='first'
     )
-    pivot_rank = pivot_val.rank(axis=0, ascending=False, method='min').astype(int)
+
+    # ── NaN対策: na_option='bottom' + fillna(0) で安全にint変換 ──
+    pivot_rank = (
+        pivot_val.rank(axis=0, ascending=False, method='min', na_option='bottom')
+        .fillna(0)
+        .astype(int)
+    )
 
     latest_col = pivot_val.columns[-1]
     sort_order = pivot_rank[latest_col].sort_values(ascending=True).index
@@ -321,10 +327,16 @@ def build_industry_heatmap(
 
     ts_df = pd.concat(records, ignore_index=True)
 
-    pivot_val  = ts_df.pivot_table(
+    pivot_val = ts_df.pivot_table(
         index='Industry', columns='Date', values=value_col, aggfunc='first'
     )
-    pivot_rank = pivot_val.rank(axis=0, ascending=False, method='min').astype(int)
+
+    # ── NaN対策: na_option='bottom' + fillna(0) で安全にint変換 ──
+    pivot_rank = (
+        pivot_val.rank(axis=0, ascending=False, method='min', na_option='bottom')
+        .fillna(0)
+        .astype(int)
+    )
 
     latest_col = pivot_val.columns[-1]
     sort_order = pivot_rank[latest_col].sort_values(ascending=True).index
