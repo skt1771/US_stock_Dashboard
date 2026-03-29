@@ -7,12 +7,12 @@ import glob
 import gc
 
 st.set_page_config(
-    page_title="米国株RSダッシュボード",
+    page_title="日本株RSダッシュボード",
     page_icon="📈",
     layout="wide"
 )
 
-st.title("📈 米国株RS分析ダッシュボード")
+st.title("📈 日本株RS分析ダッシュボード")
 st.markdown("---")
 
 DATA_FOLDER = "data"
@@ -23,7 +23,7 @@ DATA_FOLDER = "data"
 # =============================================
 
 def get_display_date(screening_date: datetime) -> datetime:
-    return screening_date - timedelta(days=1)
+    return screening_date
 
 
 def get_year_month_from_date(date: datetime) -> str:
@@ -144,55 +144,81 @@ def load_all_data(data_folder: str = DATA_FOLDER) -> list:
                 industry_rs_df = None
                 stock_df       = None
 
+                # ── Sector_Ranking シート ──
+                if 'Sector_Ranking' in excel.sheet_names:
+                    sec_raw = excel.parse('Sector_Ranking')
+                    sec_raw = sec_raw.rename(columns={
+                        'RS_Pct_CW':      'Sector_RS_Pct_CW',
+                        'RS_Pct_EW':      'Sector_RS_Pct_EW',
+                        'BP_CW':          'BP_CW',
+                        'BP_EW':          'BP_EW',
+                        'BP_Label_CW':    'BP_Label_CW',
+                        'BP_Label_EW':    'BP_Label_EW',
+                        'Perf_1Y_Pct_CW': 'Perf_1Y_Pct_CW',
+                        'Perf_1Y_Pct_EW': 'Perf_1Y_Pct_EW',
+                        'N_Stocks':       'N_Stocks',
+                    })
+                    sector_rs_df = sec_raw.copy()
+
+                # ── Industry_Ranking シート ──
+                if 'Industry_Ranking' in excel.sheet_names:
+                    ind_raw = excel.parse('Industry_Ranking')
+                    ind_raw = ind_raw.rename(columns={
+                        'RS_Pct_CW':      'Industry_RS_Pct_CW',
+                        'RS_Pct_EW':      'Industry_RS_Pct_EW',
+                        'BP_CW':          'BP_CW',
+                        'BP_EW':          'BP_EW',
+                        'BP_Label_CW':    'BP_Label_CW',
+                        'BP_Label_EW':    'BP_Label_EW',
+                        'Perf_1Y_Pct_CW': 'Perf_1Y_Pct_CW',
+                        'Perf_1Y_Pct_EW': 'Perf_1Y_Pct_EW',
+                        'N_Stocks':       'N_Stocks',
+                    })
+                    industry_rs_df = ind_raw.copy()
+
+                # ── Screening_Results シート ──
                 if 'Screening_Results' in excel.sheet_names:
-                    rs_cols = [
-                        'Sector',   'Sector_RS_Pct_CW',   'Sector_RS_Pct_EW',
-                        'Industry', 'Industry_RS_Pct_CW', 'Industry_RS_Pct_EW',
-                    ]
+                    raw_all = excel.parse('Screening_Results')
+
                     stock_cols = [
-                        'Symbol', 'Company Name',
-                        'Sector', 'Industry',
+                        'Code', 'CoName',
+                        'YF_Sector', 'YF_Industry',
+                        'MktNm',
                         'Screening_Score', 'Technical_Score', 'Fundamental_Score',
+                        'Screening_Score_EW', 'Technical_Score_EW',
                         'RS_Score',
                         'Individual_RS_Percentile',
                         'Sector_RS_Pct_CW', 'Sector_RS_Pct_EW',
                         'Industry_RS_Pct_CW', 'Industry_RS_Pct_EW',
+                        'BP_Stock', 'BP_Label_Stock',
+                        'BP_Sector_CW', 'BP_Label_Sector_CW',
+                        'BP_Industry_CW', 'BP_Label_Industry_CW',
+                        'BP_Sector_EW', 'BP_Label_Sector_EW',
+                        'BP_Industry_EW', 'BP_Label_Industry_EW',
                         'Current_Price', 'MA21', 'MA50', 'MA150',
                         'ATR_Pct_from_MA50', 'ADR',
-                        'sales_accel_3_qtrs', 'eps_accel_3_qtrs',
-                        'BP_Stock',
-                        'BP_Sector_CW', 'BP_Sector_EW',
-                        'BP_Industry_CW', 'BP_Industry_EW',
+                        'eps_pct_chg_last_qtr', 'eps_est_cur_yr_pct',
+                        'eps_accel_3_qtrs',
+                        'sales_pct_chg_last_qtr', 'sales_accel_3_qtrs',
+                        'roe', 'Market_Cap',
+                        'Data_Date',
                     ]
-
-                    raw_all = excel.parse('Screening_Results')
-
-                    avail_rs = [c for c in rs_cols if c in raw_all.columns]
-                    raw = raw_all[avail_rs].copy()
-
-                    if 'Sector' in raw.columns:
-                        sector_rs_df = (
-                            raw.dropna(subset=['Sector'])
-                               .groupby('Sector', as_index=False)
-                               .agg(
-                                   Sector_RS_Pct_CW=('Sector_RS_Pct_CW', 'first'),
-                                   Sector_RS_Pct_EW=('Sector_RS_Pct_EW', 'first'),
-                               )
-                        )
-
-                    if 'Industry' in raw.columns:
-                        industry_rs_df = (
-                            raw.dropna(subset=['Industry'])
-                               .groupby('Industry', as_index=False)
-                               .agg(
-                                   Industry_RS_Pct_CW=('Industry_RS_Pct_CW', 'first'),
-                                   Industry_RS_Pct_EW=('Industry_RS_Pct_EW', 'first'),
-                               )
-                        )
-
                     avail_stock = [c for c in stock_cols if c in raw_all.columns]
                     stock_df = raw_all[avail_stock].copy()
 
+                    # ── 証券コードを4桁に変換 ──
+                    # 例: 80580.0 → 80580 → 8058
+                    if 'Code' in stock_df.columns:
+                        stock_df['Code'] = (
+                            stock_df['Code']
+                            .astype(str)
+                            .str.strip()
+                            .str.replace(r'\.0$', '', regex=True)  # 80580.0 → 80580
+                            .str.zfill(5)                           # 桁揃え念のため
+                            .str[:-1]                               # 末尾1桁除去 → 4桁
+                        )
+
+                # ── Market_Summary シート ──
                 market_summary = None
                 if 'Market_Summary' in excel.sheet_names:
                     ms = excel.parse('Market_Summary')
@@ -202,14 +228,21 @@ def load_all_data(data_folder: str = DATA_FOLDER) -> list:
                         'score':  ms_dict.get('スコア率', '')
                     }
 
+                # ── Market_Condition シート ──
+                market_condition = None
+                if 'Market_Condition' in excel.sheet_names:
+                    mc = excel.parse('Market_Condition')
+                    market_condition = mc.copy()
+
             all_data.append({
-                'date':           date,
-                'display_date':   get_display_date(date),
-                'sector_rs_df':   sector_rs_df,
-                'industry_rs_df': industry_rs_df,
-                'stock_df':       stock_df,
-                'market_summary': market_summary,
-                'filename':       filename,
+                'date':             date,
+                'display_date':     get_display_date(date),
+                'sector_rs_df':     sector_rs_df,
+                'industry_rs_df':   industry_rs_df,
+                'stock_df':         stock_df,
+                'market_summary':   market_summary,
+                'market_condition': market_condition,
+                'filename':         filename,
             })
 
         except Exception as e:
@@ -246,12 +279,10 @@ def build_sector_heatmap(
         return None
 
     ts_df = pd.concat(records, ignore_index=True)
-
     pivot_val = ts_df.pivot_table(
         index='Sector', columns='Date', values=value_col, aggfunc='first'
     )
 
-    # ── NaN対策: na_option='bottom' + fillna(0) で安全にint変換 ──
     pivot_rank = (
         pivot_val.rank(axis=0, ascending=False, method='min', na_option='bottom')
         .fillna(0)
@@ -264,7 +295,7 @@ def build_sector_heatmap(
     pivot_rank = pivot_rank.loc[sort_order]
 
     x_labels = [d.strftime('%m/%d') for d in pivot_val.columns]
-    y_labels = pivot_val.index.tolist()
+    y_labels  = pivot_val.index.tolist()
     n = len(y_labels)
 
     fig = go.Figure(data=go.Heatmap(
@@ -326,12 +357,10 @@ def build_industry_heatmap(
         return None
 
     ts_df = pd.concat(records, ignore_index=True)
-
     pivot_val = ts_df.pivot_table(
         index='Industry', columns='Date', values=value_col, aggfunc='first'
     )
 
-    # ── NaN対策: na_option='bottom' + fillna(0) で安全にint変換 ──
     pivot_rank = (
         pivot_val.rank(axis=0, ascending=False, method='min', na_option='bottom')
         .fillna(0)
@@ -344,7 +373,7 @@ def build_industry_heatmap(
     pivot_rank = pivot_rank.loc[sort_order].head(top_n)
 
     x_labels = [d.strftime('%m/%d') for d in pivot_val.columns]
-    y_labels = pivot_val.index.tolist()
+    y_labels  = pivot_val.index.tolist()
     n = len(y_labels)
 
     fig = go.Figure(data=go.Heatmap(
@@ -390,15 +419,30 @@ def build_latest_sector_table(latest_df: pd.DataFrame) -> pd.DataFrame:
     if latest_df is None or latest_df.empty:
         return pd.DataFrame()
 
+    need = {'Sector', 'Sector_RS_Pct_CW', 'Sector_RS_Pct_EW'}
+    if not need.issubset(latest_df.columns):
+        return pd.DataFrame()
+
     df = latest_df[['Sector', 'Sector_RS_Pct_CW', 'Sector_RS_Pct_EW']].copy()
+
+    for c in ['Perf_1Y_Pct_CW', 'N_Stocks']:
+        if c in latest_df.columns:
+            df[c] = latest_df[c].values
+
     df = df.sort_values('Sector_RS_Pct_CW', ascending=False).reset_index(drop=True)
     df.insert(0, 'CW順位', range(1, len(df) + 1))
 
     ew_rank = df['Sector_RS_Pct_EW'].rank(ascending=False, method='min').astype(int)
     df.insert(3, 'EW順位', ew_rank)
-    df['順位差\n(EW-CW)'] = df['CW順位'] - df['EW順位']
+    df['順位差(EW-CW)'] = df['CW順位'] - df['EW順位']
 
-    df.columns = ['CW順位', 'セクター', 'RS%（CW）', 'EW順位', 'RS%（EW）', '順位差\n(EW-CW)']
+    df = df.rename(columns={
+        'Sector':           'セクター',
+        'Sector_RS_Pct_CW': 'RS%（CW）',
+        'Sector_RS_Pct_EW': 'RS%（EW）',
+        'Perf_1Y_Pct_CW':   '1年騰落率%',
+        'N_Stocks':         '銘柄数',
+    })
     return df
 
 
@@ -410,16 +454,64 @@ def build_latest_industry_table(latest_df: pd.DataFrame, top_n: int = 30) -> pd.
     if latest_df is None or latest_df.empty:
         return pd.DataFrame()
 
+    need = {'Industry', 'Industry_RS_Pct_CW', 'Industry_RS_Pct_EW'}
+    if not need.issubset(latest_df.columns):
+        return pd.DataFrame()
+
     df = latest_df[['Industry', 'Industry_RS_Pct_CW', 'Industry_RS_Pct_EW']].copy()
+
+    for c in ['Perf_1Y_Pct_CW', 'N_Stocks']:
+        if c in latest_df.columns:
+            df[c] = latest_df[c].values
+
     df = df.sort_values('Industry_RS_Pct_CW', ascending=False).reset_index(drop=True)
     df.insert(0, 'CW順位', range(1, len(df) + 1))
 
     ew_rank = df['Industry_RS_Pct_EW'].rank(ascending=False, method='min').astype(int)
     df.insert(3, 'EW順位', ew_rank)
-    df['順位差\n(EW-CW)'] = df['CW順位'] - df['EW順位']
+    df['順位差(EW-CW)'] = df['CW順位'] - df['EW順位']
 
-    df.columns = ['CW順位', 'インダストリー', 'RS%（CW）', 'EW順位', 'RS%（EW）', '順位差\n(EW-CW)']
+    df = df.rename(columns={
+        'Industry':           'インダストリー',
+        'Industry_RS_Pct_CW': 'RS%（CW）',
+        'Industry_RS_Pct_EW': 'RS%（EW）',
+        'Perf_1Y_Pct_CW':     '1年騰落率%',
+        'N_Stocks':           '銘柄数',
+    })
     return df.head(top_n)
+
+
+# =============================================
+# マーケット状況詳細表示
+# =============================================
+
+def render_market_condition(market_condition: pd.DataFrame):
+    if market_condition is None or market_condition.empty:
+        st.info("Market_Condition データがありません。")
+        return
+
+    st.subheader("📊 マーケット詳細コンディション")
+
+    cols = list(market_condition.columns)
+    col_joho   = cols[0] if len(cols) > 0 else None
+    col_hantei = cols[2] if len(cols) > 2 else None
+
+    def row_style(row):
+        hantei_val = ''
+        if col_hantei and col_hantei in row.index:
+            hantei_val = str(row[col_hantei]).lower()
+        if hantei_val == 'positive':
+            bg = 'background-color: #e8f5e9'
+        elif hantei_val == 'negative':
+            bg = 'background-color: #ffebee'
+        elif hantei_val == 'neutral':
+            bg = 'background-color: #fffde7'
+        else:
+            bg = ''
+        return [bg] * len(row)
+
+    styled = market_condition.style.apply(row_style, axis=1)
+    st.dataframe(styled, use_container_width=True, hide_index=True)
 
 
 # =============================================
@@ -434,13 +526,12 @@ def render_momentum_tab(
 ):
     sector_rs_col   = f'Sector_RS_Pct_{rs_mode}'
     industry_rs_col = f'Industry_RS_Pct_{rs_mode}'
+    score_col       = 'Screening_Score'    if rs_mode == 'CW' else 'Screening_Score_EW'
+    tech_col        = 'Technical_Score'    if rs_mode == 'CW' else 'Technical_Score_EW'
     mode_label      = "（時価総額加重: CW）" if rs_mode == "CW" else "（等加重: EW）"
 
     if stock_df is None or stock_df.empty:
-        st.error(
-            "銘柄レベルのデータが読み込めませんでした。"
-            " Screening_Results シートに必要なカラムが含まれているか確認してください。"
-        )
+        st.error("銘柄データが読み込めませんでした。")
         return
 
     st.caption(
@@ -465,25 +556,25 @@ def render_momentum_tab(
                     key=f"{tab_key}_atr_min"
                 )
                 atr_max = st.number_input(
-                    "ATR from MA50 最大値 (%)", value=5.0, step=0.1,
+                    "ATR from MA50 最大値 (%)", value=8.0, step=0.1,
                     key=f"{tab_key}_atr_max"
                 )
                 adr_min = st.number_input(
-                    "ADR 最小値 (%)", value=4.0, step=0.5,
+                    "ADR 最小値 (%)", value=3.0, step=0.5,
                     key=f"{tab_key}_adr_min"
                 )
                 st.markdown("---")
                 st.markdown("**移動平均線条件**")
                 ma21_cond = st.checkbox(
-                    "株価 > MA21（21日移動平均）", value=True,
+                    "株価 > MA21", value=True,
                     key=f"{tab_key}_ma21"
                 )
                 ma50_cond = st.checkbox(
-                    "株価 > MA50（50日移動平均）", value=True,
+                    "株価 > MA50", value=True,
                     key=f"{tab_key}_ma50"
                 )
                 ma150_cond = st.checkbox(
-                    "株価 > MA150（150日移動平均）", value=True,
+                    "株価 > MA150", value=True,
                     key=f"{tab_key}_ma150"
                 )
                 ma_order_cond = st.checkbox(
@@ -498,8 +589,18 @@ def render_momentum_tab(
             st.markdown("---")
             st.markdown("**価格条件**")
             price_min = st.number_input(
-                "株価 最小値 ($)", value=10.0, step=1.0,
+                "株価 最小値 (円)", value=500.0, step=100.0,
                 key=f"{tab_key}_price_min"
+            )
+
+            st.markdown("---")
+            st.markdown("**市場区分**")
+            mkt_options = ['プライム', 'スタンダード', 'グロース']
+            selected_mkt = st.multiselect(
+                "市場区分を選択（複数可、未選択=すべて）",
+                options=mkt_options,
+                default=[],
+                key=f"{tab_key}_mkt"
             )
 
             st.markdown("---")
@@ -516,7 +617,6 @@ def render_momentum_tab(
                 )
             else:
                 fundamental_min = 0
-                st.info("ファンダメンタル条件は無効です。")
 
         with col2:
             st.subheader(f"📈 RS条件 {mode_label}")
@@ -533,7 +633,7 @@ def render_momentum_tab(
                 )
                 sector_rs_min = st.number_input(
                     f"Sector RS Pct {rs_mode} 最小値",
-                    value=79, step=1,
+                    value=63, step=1,
                     key=f"{tab_key}_sec_rs_min"
                 )
                 industry_rs_min = st.number_input(
@@ -543,39 +643,23 @@ def render_momentum_tab(
                 )
             else:
                 individual_rs_min = sector_rs_min = industry_rs_min = 0
-                st.info("RS条件は無効です。")
 
             st.markdown("---")
-            st.markdown("**📋 現在の設定:**")
-            lines = [
-                f"テクニカル条件: {'✅ 有効' if enable_technical else '❌ 無効'}",
-            ]
-            if enable_technical:
-                lines += [
-                    f"  - ATR: {atr_min}% ~ {atr_max}%",
-                    f"  - ADR: {adr_min}% 以上",
-                    f"  - MA21条件: {'✅' if ma21_cond else '❌'}",
-                    f"  - MA50条件: {'✅' if ma50_cond else '❌'}",
-                    f"  - MA150条件: {'✅' if ma150_cond else '❌'}",
-                    f"  - MA順列: {'✅' if ma_order_cond else '❌'}",
-                ]
-            lines.append(
-                f"RS条件（{rs_mode}）: {'✅ 有効' if enable_rs else '❌ 無効'}"
+            st.markdown("**スクリーニングスコア条件**")
+            enable_score = st.checkbox(
+                "スコア条件を有効にする", value=False,
+                key=f"{tab_key}_enable_score"
             )
-            if enable_rs:
-                lines += [
-                    f"  - 個別RS: {individual_rs_min}% 以上",
-                    f"  - セクターRS {rs_mode}: {sector_rs_min}% 以上",
-                    f"  - 業種RS {rs_mode}: {industry_rs_min}% 以上",
-                ]
-            lines.append(f"価格: ${price_min} 以上")
-            lines.append(
-                f"ファンダメンタル: {'✅ 有効' if enable_fundamental else '❌ 無効'}"
-                + (f"  ({fundamental_min}点以上)" if enable_fundamental else "")
-            )
-            st.info("\n".join(lines))
+            if enable_score:
+                score_min = st.number_input(
+                    f"スクリーニングスコア（{rs_mode}）最小値",
+                    min_value=0, max_value=30, value=15, step=1,
+                    key=f"{tab_key}_score_min"
+                )
+            else:
+                score_min = 0
 
-    # フィルタリング実行
+    # ── フィルタリング実行 ──
     filtered = stock_df.copy()
 
     if enable_technical:
@@ -598,23 +682,27 @@ def render_momentum_tab(
                 (filtered['MA50'] > filtered['MA150'])
             ]
 
+    if 'Current_Price' in filtered.columns:
+        filtered = filtered[filtered['Current_Price'] >= price_min]
+
+    if selected_mkt and 'MktNm' in filtered.columns:
+        filtered = filtered[filtered['MktNm'].isin(selected_mkt)]
+
     if enable_rs:
         if 'Individual_RS_Percentile' in filtered.columns:
-            filtered = filtered[
-                filtered['Individual_RS_Percentile'] >= individual_rs_min
-            ]
+            filtered = filtered[filtered['Individual_RS_Percentile'] >= individual_rs_min]
         if sector_rs_col in filtered.columns:
             filtered = filtered[filtered[sector_rs_col] >= sector_rs_min]
         if industry_rs_col in filtered.columns:
             filtered = filtered[filtered[industry_rs_col] >= industry_rs_min]
 
-    if 'Current_Price' in filtered.columns:
-        filtered = filtered[filtered['Current_Price'] >= price_min]
-
     if enable_fundamental and 'Fundamental_Score' in filtered.columns:
         filtered = filtered[filtered['Fundamental_Score'] >= fundamental_min]
 
-    # 結果表示
+    if enable_score and score_col in filtered.columns:
+        filtered = filtered[filtered[score_col] >= score_min]
+
+    # ── 結果表示 ──
     st.markdown("---")
     st.subheader(f"🚀 フィルタリング結果: {len(filtered)} 銘柄")
 
@@ -623,17 +711,21 @@ def render_momentum_tab(
         return
 
     display_cols_ordered = [
-        'Symbol', 'Company Name', 'Sector', 'Industry',
-        'Screening_Score', 'Technical_Score', 'Fundamental_Score',
+        'Code', 'CoName', 'YF_Sector', 'YF_Industry', 'MktNm',
+        score_col, tech_col, 'Fundamental_Score',
         'RS_Score', 'Individual_RS_Percentile',
         sector_rs_col, industry_rs_col,
         'Current_Price', 'MA21', 'MA50', 'MA150',
         'ATR_Pct_from_MA50', 'ADR',
+        'BP_Stock', 'BP_Label_Stock',
+        'eps_pct_chg_last_qtr', 'eps_accel_3_qtrs',
+        'sales_pct_chg_last_qtr', 'sales_accel_3_qtrs',
+        'roe', 'Market_Cap',
     ]
     display_cols = [c for c in display_cols_ordered if c in filtered.columns]
 
     sort_key = next(
-        (c for c in ['Screening_Score', 'RS_Score', 'Individual_RS_Percentile']
+        (c for c in [score_col, 'RS_Score', 'Individual_RS_Percentile']
          if c in filtered.columns),
         display_cols[0]
     )
@@ -650,61 +742,57 @@ def render_momentum_tab(
         with c1:
             st.metric("銘柄数", len(filtered))
         with c2:
-            if 'Screening_Score' in filtered.columns:
-                st.metric("平均スコア", f"{filtered['Screening_Score'].mean():.1f}")
+            if score_col in filtered.columns:
+                st.metric("平均スコア", f"{filtered[score_col].mean():.1f}")
         with c3:
             if 'Individual_RS_Percentile' in filtered.columns:
-                st.metric(
-                    "平均個別RS",
-                    f"{filtered['Individual_RS_Percentile'].mean():.1f}%"
-                )
+                st.metric("平均個別RS", f"{filtered['Individual_RS_Percentile'].mean():.1f}%")
         with c4:
             if 'ADR' in filtered.columns:
                 st.metric("平均ADR", f"{filtered['ADR'].mean():.1f}%")
 
-        if 'Sector' in filtered.columns:
+        if 'YF_Sector' in filtered.columns:
             st.markdown("**セクター分布:**")
-            st.bar_chart(filtered['Sector'].value_counts())
+            st.bar_chart(filtered['YF_Sector'].value_counts())
+        if 'MktNm' in filtered.columns:
+            st.markdown("**市場区分分布:**")
+            st.bar_chart(filtered['MktNm'].value_counts())
 
     dl1, dl2 = st.columns(2)
     with dl1:
-        csv = filtered[display_cols].to_csv(index=False).encode('utf-8')
+        csv = filtered[display_cols].to_csv(index=False, encoding='utf-8-sig')
         st.download_button(
-            label="📥 CSVダウンロード（全データ）",
-            data=csv,
-            file_name=(
-                f"momentum_{rs_mode.lower()}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-            ),
+            label="📥 CSVダウンロード",
+            data=csv.encode('utf-8-sig'),
+            file_name=f"jp_momentum_{rs_mode.lower()}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
             mime='text/csv',
             key=f"{tab_key}_dl_csv",
         )
     with dl2:
-        if 'Symbol' in filtered.columns:
-            syms = (
-                filtered.sort_values(sort_key, ascending=False)['Symbol']
+        if 'Code' in filtered.columns:
+            codes = (
+                filtered.sort_values(sort_key, ascending=False)['Code']
                 .dropna().astype(str).tolist()
             )
             st.download_button(
-                label="📝 Symbolリスト（TXT）",
-                data=','.join(syms),
-                file_name=(
-                    f"momentum_symbols_{rs_mode.lower()}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-                ),
+                label="📝 証券コードリスト（TXT）",
+                data=','.join(codes),
+                file_name=f"jp_codes_{rs_mode.lower()}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
                 mime='text/plain',
                 key=f"{tab_key}_dl_txt",
             )
 
-    if 'Symbol' in filtered.columns:
-        with st.expander("📌 Symbolリスト表示（TradingView用）"):
-            syms = (
-                filtered.sort_values(sort_key, ascending=False)['Symbol']
+    if 'Code' in filtered.columns:
+        with st.expander("📌 証券コードリスト表示"):
+            codes = (
+                filtered.sort_values(sort_key, ascending=False)['Code']
                 .dropna().astype(str).tolist()
             )
             st.markdown("**カンマ区切り（コピー用）:**")
-            st.code(','.join(syms), language=None)
-            st.success(f"✅ 合計 {len(syms)} 銘柄")
-            if len(syms) > 10:
-                st.info(f"📊 上位10銘柄: {', '.join(syms[:10])}")
+            st.code(','.join(codes), language=None)
+            st.success(f"✅ 合計 {len(codes)} 銘柄")
+            if len(codes) > 10:
+                st.info(f"📊 上位10銘柄: {', '.join(codes[:10])}")
 
 
 # =============================================
@@ -717,10 +805,7 @@ def render_momentum_tab_both(
     tab_key: str,
 ):
     if stock_df is None or stock_df.empty:
-        st.error(
-            "銘柄レベルのデータが読み込めませんでした。"
-            " Screening_Results シートに必要なカラムが含まれているか確認してください。"
-        )
+        st.error("銘柄データが読み込めませんでした。")
         return
 
     st.caption(
@@ -730,7 +815,6 @@ def render_momentum_tab_both(
 
     with st.expander("⚙️ フィルター条件を設定する", expanded=True):
 
-        # ── テクニカル条件 ───────────────────────────────────
         st.subheader("📊 テクニカル条件")
         col_t1, col_t2 = st.columns(2)
 
@@ -746,7 +830,7 @@ def render_momentum_tab_both(
                     key=f"{tab_key}_atr_min"
                 )
                 atr_max = st.number_input(
-                    "ATR from MA50 最大値 (%)", value=6.0, step=0.1,
+                    "ATR from MA50 最大値 (%)", value=8.0, step=0.1,
                     key=f"{tab_key}_atr_max"
                 )
                 st.markdown("---")
@@ -756,7 +840,7 @@ def render_momentum_tab_both(
                     key=f"{tab_key}_adr_min"
                 )
                 adr_max = st.number_input(
-                    "ADR 最大値 (%)", value=5.5, step=0.1,
+                    "ADR 最大値 (%)", value=10.0, step=0.1,
                     key=f"{tab_key}_adr_max"
                 )
             else:
@@ -768,15 +852,15 @@ def render_momentum_tab_both(
             if enable_technical:
                 st.markdown("**移動平均線条件**")
                 ma21_cond = st.checkbox(
-                    "株価 > MA21（21日移動平均）", value=True,
+                    "株価 > MA21", value=True,
                     key=f"{tab_key}_ma21"
                 )
                 ma50_cond = st.checkbox(
-                    "株価 > MA50（50日移動平均）", value=True,
+                    "株価 > MA50", value=True,
                     key=f"{tab_key}_ma50"
                 )
                 ma150_cond = st.checkbox(
-                    "株価 > MA150（150日移動平均）", value=True,
+                    "株価 > MA150", value=True,
                     key=f"{tab_key}_ma150"
                 )
                 ma_order_cond = st.checkbox(
@@ -791,10 +875,22 @@ def render_momentum_tab_both(
         with col_p1:
             st.markdown("**価格条件**")
             price_min = st.number_input(
-                "株価 最小値 ($)", value=10.0, step=1.0,
+                "株価 最小値 (円)", value=500.0, step=100.0,
                 key=f"{tab_key}_price_min"
             )
         with col_p2:
+            st.markdown("**市場区分**")
+            mkt_options = ['プライム', 'スタンダード', 'グロース']
+            selected_mkt = st.multiselect(
+                "市場区分を選択（複数可、未選択=すべて）",
+                options=mkt_options,
+                default=[],
+                key=f"{tab_key}_mkt"
+            )
+
+        st.markdown("---")
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
             st.markdown("**ファンダメンタル条件**")
             enable_fundamental = st.checkbox(
                 "ファンダメンタル条件を有効にする", value=False,
@@ -808,11 +904,22 @@ def render_momentum_tab_both(
                 )
             else:
                 fundamental_min = 0
-                st.info("ファンダメンタル条件は無効です。")
+        with col_f2:
+            st.markdown("**スクリーニングスコア条件（CW）**")
+            enable_score = st.checkbox(
+                "スコア条件を有効にする", value=False,
+                key=f"{tab_key}_enable_score"
+            )
+            if enable_score:
+                score_min = st.number_input(
+                    "スクリーニングスコア（CW）最小値",
+                    min_value=0, max_value=30, value=15, step=1,
+                    key=f"{tab_key}_score_min"
+                )
+            else:
+                score_min = 0
 
         st.markdown("---")
-
-        # ── RS条件（CW / EW 横並び） ─────────────────────────
         st.subheader("📈 RS条件（CW・EW 両方）")
         col_cw, col_ew = st.columns(2)
 
@@ -830,17 +937,16 @@ def render_momentum_tab_both(
                 )
                 sector_rs_cw_min = st.number_input(
                     "Sector RS Pct CW 最小値",
-                    value=70, step=1,
+                    value=63, step=1,
                     key=f"{tab_key}_sec_rs_cw_min"
                 )
                 industry_rs_cw_min = st.number_input(
                     "Industry RS Pct CW 最小値",
-                    value=70, step=1,
+                    value=80, step=1,
                     key=f"{tab_key}_ind_rs_cw_min"
                 )
             else:
                 individual_rs_min = sector_rs_cw_min = industry_rs_cw_min = 0
-                st.info("CW RS条件は無効です。")
 
         with col_ew:
             st.markdown("**🟠 EW（等加重）**")
@@ -851,46 +957,37 @@ def render_momentum_tab_both(
             if enable_rs_ew:
                 sector_rs_ew_min = st.number_input(
                     "Sector RS Pct EW 最小値",
-                    value=70, step=1,
+                    value=63, step=1,
                     key=f"{tab_key}_sec_rs_ew_min"
                 )
                 industry_rs_ew_min = st.number_input(
                     "Industry RS Pct EW 最小値",
-                    value=70, step=1,
+                    value=80, step=1,
                     key=f"{tab_key}_ind_rs_ew_min"
                 )
             else:
                 sector_rs_ew_min = industry_rs_ew_min = 0
-                st.info("EW RS条件は無効です。")
 
         st.markdown("---")
-
-        # ── バイプレッシャー条件（項目ごとに個別チェック）────
         st.subheader("💹 バイプレッシャー条件")
         st.caption("各項目ごとにON/OFFを切り替えられます。")
 
         bp_items = [
-            ('BP_Stock',       'BP_Stock',
-             f"{tab_key}_chk_bp_stock",   f"{tab_key}_val_bp_stock",   0.60),
-            ('BP_Sector_CW',   'BP_Sector_CW',
-             f"{tab_key}_chk_bp_sec_cw",  f"{tab_key}_val_bp_sec_cw",  0.50),
-            ('BP_Sector_EW',   'BP_Sector_EW',
-             f"{tab_key}_chk_bp_sec_ew",  f"{tab_key}_val_bp_sec_ew",  0.50),
-            ('BP_Industry_CW', 'BP_Industry_CW',
-             f"{tab_key}_chk_bp_ind_cw",  f"{tab_key}_val_bp_ind_cw",  0.55),
-            ('BP_Industry_EW', 'BP_Industry_EW',
-             f"{tab_key}_chk_bp_ind_ew",  f"{tab_key}_val_bp_ind_ew",  0.55),
+            ('BP_Stock',       'BP_Stock',       f"{tab_key}_chk_bp_stock",   f"{tab_key}_val_bp_stock",   0.55),
+            ('BP_Sector_CW',   'BP_Sector_CW',   f"{tab_key}_chk_bp_sec_cw",  f"{tab_key}_val_bp_sec_cw",  0.50),
+            ('BP_Sector_EW',   'BP_Sector_EW',   f"{tab_key}_chk_bp_sec_ew",  f"{tab_key}_val_bp_sec_ew",  0.50),
+            ('BP_Industry_CW', 'BP_Industry_CW', f"{tab_key}_chk_bp_ind_cw",  f"{tab_key}_val_bp_ind_cw",  0.50),
+            ('BP_Industry_EW', 'BP_Industry_EW', f"{tab_key}_chk_bp_ind_ew",  f"{tab_key}_val_bp_ind_ew",  0.50),
         ]
 
         bp_settings = {}
-
         col_bp1, col_bp2 = st.columns(2)
         for i, (col_name, label, chk_key, val_key, default_val) in enumerate(bp_items):
             target_col = col_bp1 if i % 2 == 0 else col_bp2
             with target_col:
                 enabled_min = st.checkbox(
                     f"{label} 最小値を有効にする",
-                    value=True,
+                    value=False,
                     key=chk_key,
                 )
                 if enabled_min:
@@ -909,69 +1006,19 @@ def render_momentum_tab_both(
                         value=False,
                         key=f"{tab_key}_chk_bp_stock_max",
                     )
-                    if enabled_max:
-                        max_val = st.number_input(
-                            f"{label} 最大値",
-                            value=0.70,
-                            step=0.05, format="%.2f",
-                            key=f"{tab_key}_val_bp_stock_max",
-                        )
-                    else:
-                        max_val = float('inf')
+                    max_val = st.number_input(
+                        f"{label} 最大値",
+                        value=0.80,
+                        step=0.05, format="%.2f",
+                        key=f"{tab_key}_val_bp_stock_max",
+                    ) if enabled_max else float('inf')
                 else:
                     enabled_max = False
                     max_val = float('inf')
 
                 bp_settings[col_name] = (enabled_min, min_val, enabled_max, max_val)
 
-        # ── 設定サマリー ──────────────────────────────────
-        st.markdown("---")
-        st.markdown("**📋 現在の設定:**")
-        lines = [
-            f"テクニカル条件: {'✅ 有効' if enable_technical else '❌ 無効'}",
-        ]
-        if enable_technical:
-            lines += [
-                f"  - ATR: {atr_min}% ~ {atr_max}%",
-                f"  - ADR: {adr_min}% ~ {adr_max}%",
-                f"  - MA21条件: {'✅' if ma21_cond else '❌'}",
-                f"  - MA50条件: {'✅' if ma50_cond else '❌'}",
-                f"  - MA150条件: {'✅' if ma150_cond else '❌'}",
-                f"  - MA順列: {'✅' if ma_order_cond else '❌'}",
-            ]
-        lines.append(f"価格: ${price_min} 以上")
-        lines.append(
-            f"ファンダメンタル: {'✅ 有効' if enable_fundamental else '❌ 無効'}"
-            + (f"  ({fundamental_min}点以上)" if enable_fundamental else "")
-        )
-        lines.append(
-            f"CW RS条件: {'✅ 有効' if enable_rs_cw else '❌ 無効'}"
-        )
-        if enable_rs_cw:
-            lines += [
-                f"  - 個別RS: {individual_rs_min}% 以上",
-                f"  - セクターRS CW: {sector_rs_cw_min}% 以上",
-                f"  - 業種RS CW: {industry_rs_cw_min}% 以上",
-            ]
-        lines.append(
-            f"EW RS条件: {'✅ 有効' if enable_rs_ew else '❌ 無効'}"
-        )
-        if enable_rs_ew:
-            lines += [
-                f"  - セクターRS EW: {sector_rs_ew_min}% 以上",
-                f"  - 業種RS EW: {industry_rs_ew_min}% 以上",
-            ]
-        lines.append("バイプレッシャー条件:")
-        for col_name, (enabled_min, min_val, enabled_max, max_val) in bp_settings.items():
-            min_str = f"最小 {min_val:.2f} 以上" if enabled_min else "最小 無効"
-            if col_name == 'BP_Stock':
-                max_str = f"／最大 {max_val:.2f} 以下" if enabled_max else "／最大 無効"
-            else:
-                max_str = ""
-            lines.append(f"  - {col_name}: {min_str}{max_str}")
-        st.info("\n".join(lines))
-
-    # ── フィルタリング実行 ────────────────────────────────
+    # ── フィルタリング実行 ──
     filtered = stock_df.copy()
 
     if enable_technical:
@@ -1000,14 +1047,18 @@ def render_momentum_tab_both(
     if 'Current_Price' in filtered.columns:
         filtered = filtered[filtered['Current_Price'] >= price_min]
 
+    if selected_mkt and 'MktNm' in filtered.columns:
+        filtered = filtered[filtered['MktNm'].isin(selected_mkt)]
+
     if enable_fundamental and 'Fundamental_Score' in filtered.columns:
         filtered = filtered[filtered['Fundamental_Score'] >= fundamental_min]
 
+    if enable_score and 'Screening_Score' in filtered.columns:
+        filtered = filtered[filtered['Screening_Score'] >= score_min]
+
     if enable_rs_cw:
         if 'Individual_RS_Percentile' in filtered.columns:
-            filtered = filtered[
-                filtered['Individual_RS_Percentile'] >= individual_rs_min
-            ]
+            filtered = filtered[filtered['Individual_RS_Percentile'] >= individual_rs_min]
         if 'Sector_RS_Pct_CW' in filtered.columns:
             filtered = filtered[filtered['Sector_RS_Pct_CW'] >= sector_rs_cw_min]
         if 'Industry_RS_Pct_CW' in filtered.columns:
@@ -1027,7 +1078,7 @@ def render_momentum_tab_both(
         if enabled_max:
             filtered = filtered[filtered[col_name] <= max_val]
 
-    # ── 結果表示 ──────────────────────────────────────────
+    # ── 結果表示 ──
     st.markdown("---")
     st.subheader(f"🚀 フィルタリング結果: {len(filtered)} 銘柄")
 
@@ -1036,16 +1087,21 @@ def render_momentum_tab_both(
         return
 
     display_cols_ordered = [
-        'Symbol', 'Company Name', 'Sector', 'Industry',
-        'Screening_Score', 'Technical_Score', 'Fundamental_Score',
+        'Code', 'CoName', 'YF_Sector', 'YF_Industry', 'MktNm',
+        'Screening_Score', 'Screening_Score_EW',
+        'Technical_Score', 'Technical_Score_EW',
+        'Fundamental_Score',
         'RS_Score', 'Individual_RS_Percentile',
-        'Sector_RS_Pct_CW',  'Sector_RS_Pct_EW',
+        'Sector_RS_Pct_CW', 'Sector_RS_Pct_EW',
         'Industry_RS_Pct_CW', 'Industry_RS_Pct_EW',
         'Current_Price', 'MA21', 'MA50', 'MA150',
         'ATR_Pct_from_MA50', 'ADR',
-        'BP_Stock',
+        'BP_Stock', 'BP_Label_Stock',
         'BP_Sector_CW', 'BP_Sector_EW',
         'BP_Industry_CW', 'BP_Industry_EW',
+        'eps_pct_chg_last_qtr', 'eps_accel_3_qtrs',
+        'sales_pct_chg_last_qtr', 'sales_accel_3_qtrs',
+        'roe', 'Market_Cap',
     ]
     display_cols = [c for c in display_cols_ordered if c in filtered.columns]
 
@@ -1068,60 +1124,56 @@ def render_momentum_tab_both(
             st.metric("銘柄数", len(filtered))
         with c2:
             if 'Screening_Score' in filtered.columns:
-                st.metric("平均スコア", f"{filtered['Screening_Score'].mean():.1f}")
+                st.metric("平均スコア(CW)", f"{filtered['Screening_Score'].mean():.1f}")
         with c3:
             if 'Individual_RS_Percentile' in filtered.columns:
-                st.metric(
-                    "平均個別RS",
-                    f"{filtered['Individual_RS_Percentile'].mean():.1f}%"
-                )
+                st.metric("平均個別RS", f"{filtered['Individual_RS_Percentile'].mean():.1f}%")
         with c4:
             if 'ADR' in filtered.columns:
                 st.metric("平均ADR", f"{filtered['ADR'].mean():.1f}%")
 
-        if 'Sector' in filtered.columns:
+        if 'YF_Sector' in filtered.columns:
             st.markdown("**セクター分布:**")
-            st.bar_chart(filtered['Sector'].value_counts())
+            st.bar_chart(filtered['YF_Sector'].value_counts())
+        if 'MktNm' in filtered.columns:
+            st.markdown("**市場区分分布:**")
+            st.bar_chart(filtered['MktNm'].value_counts())
 
     dl1, dl2 = st.columns(2)
     with dl1:
-        csv = filtered[display_cols].to_csv(index=False).encode('utf-8')
+        csv = filtered[display_cols].to_csv(index=False, encoding='utf-8-sig')
         st.download_button(
-            label="📥 CSVダウンロード（全データ）",
-            data=csv,
-            file_name=(
-                f"momentum_both_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-            ),
+            label="📥 CSVダウンロード",
+            data=csv.encode('utf-8-sig'),
+            file_name=f"jp_momentum_both_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
             mime='text/csv',
             key=f"{tab_key}_dl_csv",
         )
     with dl2:
-        if 'Symbol' in filtered.columns:
-            syms = (
-                filtered.sort_values(sort_key, ascending=False)['Symbol']
+        if 'Code' in filtered.columns:
+            codes = (
+                filtered.sort_values(sort_key, ascending=False)['Code']
                 .dropna().astype(str).tolist()
             )
             st.download_button(
-                label="📝 Symbolリスト（TXT）",
-                data=','.join(syms),
-                file_name=(
-                    f"momentum_symbols_both_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-                ),
+                label="📝 証券コードリスト（TXT）",
+                data=','.join(codes),
+                file_name=f"jp_codes_both_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
                 mime='text/plain',
                 key=f"{tab_key}_dl_txt",
             )
 
-    if 'Symbol' in filtered.columns:
-        with st.expander("📌 Symbolリスト表示（TradingView用）"):
-            syms = (
-                filtered.sort_values(sort_key, ascending=False)['Symbol']
+    if 'Code' in filtered.columns:
+        with st.expander("📌 証券コードリスト表示"):
+            codes = (
+                filtered.sort_values(sort_key, ascending=False)['Code']
                 .dropna().astype(str).tolist()
             )
             st.markdown("**カンマ区切り（コピー用）:**")
-            st.code(','.join(syms), language=None)
-            st.success(f"✅ 合計 {len(syms)} 銘柄")
-            if len(syms) > 10:
-                st.info(f"📊 上位10銘柄: {', '.join(syms[:10])}")
+            st.code(','.join(codes), language=None)
+            st.success(f"✅ 合計 {len(codes)} 銘柄")
+            if len(codes) > 10:
+                st.info(f"📊 上位10銘柄: {', '.join(codes[:10])}")
 
 
 # =============================================
@@ -1132,15 +1184,15 @@ with st.spinner("データ読み込み中..."):
     all_data = load_all_data(DATA_FOLDER)
 
 if not all_data:
-    st.error("読み込めるデータがありません。")
+    st.error("読み込めるデータがありません。dataフォルダにExcelファイルを配置してください。")
     st.stop()
 
 all_data.sort(key=lambda x: x['date'])
-latest = all_data[-1]
+latest           = all_data[-1]
 latest_stock_df  = latest.get('stock_df')
 latest_disp_date = latest['display_date'].strftime('%Y年%m月%d日')
 
-# ── マーケット状況バナー ──────────────────────────────────
+# ── マーケット状況バナー ──
 if latest['market_summary']:
     ms     = latest['market_summary']
     status = str(ms.get('status', ''))
@@ -1158,7 +1210,9 @@ if latest['market_summary']:
         <div style="padding:16px;border-radius:10px;background:{bg};
                     border-left:6px solid {fg};margin-bottom:20px;">
             <h3 style="margin:0;color:{fg};">{emoji} マーケット状況: {status}</h3>
-            <p style="margin:4px 0 0;color:{fg};font-size:15px;">スコア率: {score}</p>
+            <p style="margin:4px 0 0;color:{fg};font-size:15px;">
+                スコア率: {score}　／　データ日付: {latest_disp_date}
+            </p>
         </div>
         """,
         unsafe_allow_html=True
@@ -1166,11 +1220,10 @@ if latest['market_summary']:
 
 st.markdown("---")
 
-# ── 月選択 ───────────────────────────────────────────────
+# ── 月選択 ──
 st.header("📊 RS 推移ダッシュボード")
 
 available_months = get_available_months(all_data)
-
 col_sel, _ = st.columns([2, 8])
 with col_sel:
     selected_month = st.selectbox(
@@ -1183,7 +1236,7 @@ with col_sel:
 month_data = filter_data_by_month(all_data, selected_month)
 st.caption(f"📅 {selected_month} のデータ: {len(month_data)} 日分")
 
-# ── タブ定義 ─────────────────────────────────────────────
+# ── タブ定義 ──
 (
     tab_sec_cw,
     tab_sec_ew,
@@ -1191,6 +1244,7 @@ st.caption(f"📅 {selected_month} のデータ: {len(month_data)} 日分")
     tab_ind_ew,
     tab_sec_compare,
     tab_ind_compare,
+    tab_market_cond,
     tab_momentum_cw,
     tab_momentum_ew,
     tab_momentum_both,
@@ -1202,13 +1256,14 @@ st.caption(f"📅 {selected_month} のデータ: {len(month_data)} 日分")
     "🏭 インダストリー EW",
     "🔀 セクター CW/EW 比較",
     "🔀 インダストリー CW/EW 比較",
+    "🌡️ マーケット状況",
     "🚀 モメンタム銘柄 CW",
     "⚖️ モメンタム銘柄 EW",
     "🎯 モメンタム銘柄 CW＋EW",
     "🔍 インダストリー銘柄検索",
 ])
 
-# ---- セクター CW ----------------------------------------
+# ---- セクター CW ----
 with tab_sec_cw:
     if len(month_data) >= 2:
         fig = build_sector_heatmap(
@@ -1223,7 +1278,7 @@ with tab_sec_cw:
     else:
         st.info("データが1日分しかありません（最低2日分必要）。")
 
-# ---- セクター EW ----------------------------------------
+# ---- セクター EW ----
 with tab_sec_ew:
     if len(month_data) >= 2:
         fig = build_sector_heatmap(
@@ -1238,7 +1293,7 @@ with tab_sec_ew:
     else:
         st.info("データが1日分しかありません（最低2日分必要）。")
 
-# ---- インダストリー CW ----------------------------------
+# ---- インダストリー CW ----
 with tab_ind_cw:
     if len(month_data) >= 2:
         col_slider, _ = st.columns([2, 8])
@@ -1261,7 +1316,7 @@ with tab_ind_cw:
     else:
         st.info("データが1日分しかありません（最低2日分必要）。")
 
-# ---- インダストリー EW ----------------------------------
+# ---- インダストリー EW ----
 with tab_ind_ew:
     if len(month_data) >= 2:
         col_slider, _ = st.columns([2, 8])
@@ -1284,7 +1339,7 @@ with tab_ind_ew:
     else:
         st.info("データが1日分しかありません（最低2日分必要）。")
 
-# ---- セクター CW/EW 比較表 ------------------------------
+# ---- セクター CW/EW 比較表 ----
 with tab_sec_compare:
     st.subheader("📋 最新セクター CW / EW ランキング比較")
     st.caption("CW順位で昇順ソート。EW順位はEW値に基づく独立したランクです。")
@@ -1292,16 +1347,22 @@ with tab_sec_compare:
     compare_df = build_latest_sector_table(latest['sector_rs_df'])
 
     if not compare_df.empty:
+        rs_cw_col = 'RS%（CW）'
+        rs_ew_col = 'RS%（EW）'
+        diff_col  = '順位差(EW-CW)'
+
+        fmt = {rs_cw_col: '{:.1f}', rs_ew_col: '{:.1f}', diff_col: '{:+d}'}
+        if '1年騰落率%' in compare_df.columns:
+            fmt['1年騰落率%'] = '{:.1f}'
+        if '銘柄数' in compare_df.columns:
+            fmt['銘柄数'] = '{:.0f}'
+
         styled = (
             compare_df.style
-            .apply(color_rs_col, subset=['RS%（CW）'])
-            .apply(color_rs_col, subset=['RS%（EW）'])
-            .apply(color_diff_col, subset=['順位差\n(EW-CW)'])
-            .format({
-                'RS%（CW）':       '{:.0f}',
-                'RS%（EW）':       '{:.0f}',
-                '順位差\n(EW-CW)': '{:+d}',
-            })
+            .apply(color_rs_col,   subset=[rs_cw_col])
+            .apply(color_rs_col,   subset=[rs_ew_col])
+            .apply(color_diff_col, subset=[diff_col])
+            .format(fmt)
         )
         st.dataframe(styled, use_container_width=True, hide_index=True, height=450)
         st.markdown("""
@@ -1310,9 +1371,9 @@ with tab_sec_compare:
         - 🔴 **マイナス（赤）**: CWのほうが上位 → 大型株が中小型株より強い
         """)
     else:
-        st.info("最新ファイルに Screening_Results シートが見つかりません。")
+        st.info("Sector_Ranking シートが見つかりません。")
 
-# ---- インダストリー CW/EW 比較表 ------------------------
+# ---- インダストリー CW/EW 比較表 ----
 with tab_ind_compare:
     st.subheader("📋 最新インダストリー CW / EW ランキング比較")
     st.caption("CW順位で昇順ソート。EW順位はEW値に基づく独立したランクです。")
@@ -1321,7 +1382,7 @@ with tab_ind_compare:
     with col_slider:
         top_n_compare = st.slider(
             "表示するインダストリー数（上位）",
-            min_value=10, max_value=146, value=30, step=5,
+            min_value=10, max_value=130, value=30, step=5,
             key="industry_compare_top_n"
         )
 
@@ -1331,16 +1392,22 @@ with tab_ind_compare:
     )
 
     if not ind_compare_df.empty:
+        rs_cw_col = 'RS%（CW）'
+        rs_ew_col = 'RS%（EW）'
+        diff_col  = '順位差(EW-CW)'
+
+        fmt = {rs_cw_col: '{:.1f}', rs_ew_col: '{:.1f}', diff_col: '{:+d}'}
+        if '1年騰落率%' in ind_compare_df.columns:
+            fmt['1年騰落率%'] = '{:.1f}'
+        if '銘柄数' in ind_compare_df.columns:
+            fmt['銘柄数'] = '{:.0f}'
+
         styled = (
             ind_compare_df.style
-            .apply(color_rs_col, subset=['RS%（CW）'])
-            .apply(color_rs_col, subset=['RS%（EW）'])
-            .apply(color_diff_col, subset=['順位差\n(EW-CW)'])
-            .format({
-                'RS%（CW）':       '{:.0f}',
-                'RS%（EW）':       '{:.0f}',
-                '順位差\n(EW-CW)': '{:+d}',
-            })
+            .apply(color_rs_col,   subset=[rs_cw_col])
+            .apply(color_rs_col,   subset=[rs_ew_col])
+            .apply(color_diff_col, subset=[diff_col])
+            .format(fmt)
         )
         st.dataframe(styled, use_container_width=True, hide_index=True, height=600)
         st.markdown("""
@@ -1349,9 +1416,23 @@ with tab_ind_compare:
         - 🔴 **マイナス（赤）**: CWのほうが上位 → 大型株が中小型株より強い
         """)
     else:
-        st.info("最新ファイルに Screening_Results シートが見つかりません。")
+        st.info("Industry_Ranking シートが見つかりません。")
 
-# ---- モメンタム銘柄 CW ----------------------------------
+# ---- マーケット状況 ----
+with tab_market_cond:
+    render_market_condition(latest.get('market_condition'))
+
+    if latest['market_summary']:
+        ms = latest['market_summary']
+        st.markdown("---")
+        st.subheader("📋 マーケットサマリー")
+        col_ms1, col_ms2 = st.columns(2)
+        with col_ms1:
+            st.metric("総合判定", ms.get('status', '-'))
+        with col_ms2:
+            st.metric("スコア率", ms.get('score', '-'))
+
+# ---- モメンタム銘柄 CW ----
 with tab_momentum_cw:
     st.header("🚀 モメンタム銘柄スクリーニング（時価総額加重: CW）")
     render_momentum_tab(
@@ -1361,7 +1442,7 @@ with tab_momentum_cw:
         tab_key='mom_cw',
     )
 
-# ---- モメンタム銘柄 EW ----------------------------------
+# ---- モメンタム銘柄 EW ----
 with tab_momentum_ew:
     st.header("⚖️ モメンタム銘柄スクリーニング（等加重: EW）")
     st.info(
@@ -1376,14 +1457,12 @@ with tab_momentum_ew:
         tab_key='mom_ew',
     )
 
-# ---- モメンタム銘柄 CW＋EW ------------------------------
+# ---- モメンタム銘柄 CW＋EW ----
 with tab_momentum_both:
     st.header("🎯 モメンタム銘柄スクリーニング（CW＋EW 両条件）")
     st.info(
         "💡 **CW＋EW モード**: 時価総額加重（CW）と等加重（EW）の"
         "両方のRS条件を同時に満たす銘柄を抽出します。"
-        " 大型株・中小型株いずれの視点でも強いセクター・インダストリーに属する"
-        "銘柄を厳選したい場合に活用してください。"
     )
     render_momentum_tab_both(
         stock_df=latest_stock_df,
@@ -1391,7 +1470,7 @@ with tab_momentum_both:
         tab_key='mom_both',
     )
 
-# ---- インダストリー銘柄検索 ------------------------------
+# ---- インダストリー銘柄検索 ----
 with tab_industry_search:
     st.header("🔍 インダストリー銘柄検索")
     st.caption(
@@ -1404,42 +1483,33 @@ with tab_industry_search:
     if latest_stock_df is None or latest_stock_df.empty:
         st.error("銘柄データが読み込めませんでした。")
     else:
-        # ── Industry一覧を取得 ──────────────────────────
+        industry_col  = 'YF_Industry'
         industry_list = sorted(
-            latest_stock_df['Industry'].dropna().unique().tolist()
-        ) if 'Industry' in latest_stock_df.columns else []
+            latest_stock_df[industry_col].dropna().unique().tolist()
+        ) if industry_col in latest_stock_df.columns else []
 
-        # ── 検索欄 ──────────────────────────────────────
         search_query = st.text_input(
             "🔍 Industry名を入力（部分一致）",
-            placeholder="例: Software, Semiconductor, Bank ...",
+            placeholder="例: Electrical, Conglomerates, Energy ...",
             key="industry_search_query",
         )
 
         if search_query:
-            # ── 部分一致でIndustryを絞り込み ────────────
             matched_industries = [
                 ind for ind in industry_list
                 if search_query.lower() in ind.lower()
             ]
 
             if not matched_industries:
-                st.warning(
-                    f"「{search_query}」に一致するIndustryが見つかりません。"
-                    " 別のキーワードをお試しください。"
-                )
+                st.warning(f"「{search_query}」に一致するIndustryが見つかりません。")
             else:
-                # ── マッチ件数に応じて選択UIを出し分け ──
                 if len(matched_industries) == 1:
                     selected_industries = matched_industries
-                    st.success(
-                        f"✅ マッチしたIndustry: **{matched_industries[0]}**"
-                    )
+                    st.success(f"✅ マッチしたIndustry: **{matched_industries[0]}**")
                 else:
                     st.info(
                         f"📋 「{search_query}」に一致するIndustryが "
                         f"**{len(matched_industries)}件** 見つかりました。"
-                        " 表示するIndustryを選択してください（複数選択可）。"
                     )
                     selected_industries = st.multiselect(
                         "表示するIndustryを選択",
@@ -1449,34 +1519,34 @@ with tab_industry_search:
                     )
 
                 if selected_industries:
-                    # ── 該当銘柄を絞り込み ───────────────
                     result_df = latest_stock_df[
-                        latest_stock_df['Industry'].isin(selected_industries)
+                        latest_stock_df[industry_col].isin(selected_industries)
                     ].copy()
 
-                    # ── 表示カラム ──────────────────────
                     display_cols_ordered = [
-                        'Symbol', 'Company Name', 'Sector', 'Industry',
-                        'Screening_Score', 'Technical_Score', 'Fundamental_Score',
+                        'Code', 'CoName', 'YF_Sector', 'YF_Industry', 'MktNm',
+                        'Screening_Score', 'Screening_Score_EW',
+                        'Technical_Score', 'Technical_Score_EW',
+                        'Fundamental_Score',
                         'RS_Score', 'Individual_RS_Percentile',
-                        'Sector_RS_Pct_CW',  'Sector_RS_Pct_EW',
+                        'Sector_RS_Pct_CW', 'Sector_RS_Pct_EW',
                         'Industry_RS_Pct_CW', 'Industry_RS_Pct_EW',
                         'Current_Price', 'MA21', 'MA50', 'MA150',
                         'ATR_Pct_from_MA50', 'ADR',
-                        'BP_Stock',
+                        'BP_Stock', 'BP_Label_Stock',
                         'BP_Sector_CW', 'BP_Sector_EW',
                         'BP_Industry_CW', 'BP_Industry_EW',
+                        'eps_pct_chg_last_qtr', 'eps_accel_3_qtrs',
+                        'sales_pct_chg_last_qtr', 'sales_accel_3_qtrs',
+                        'roe', 'Market_Cap',
                     ]
                     display_cols = [
-                        c for c in display_cols_ordered
-                        if c in result_df.columns
+                        c for c in display_cols_ordered if c in result_df.columns
                     ]
 
                     sort_key = next(
-                        (c for c in [
-                            'Screening_Score', 'RS_Score',
-                            'Individual_RS_Percentile'
-                        ] if c in result_df.columns),
+                        (c for c in ['Screening_Score', 'RS_Score', 'Individual_RS_Percentile']
+                         if c in result_df.columns),
                         display_cols[0],
                     )
 
@@ -1486,88 +1556,63 @@ with tab_industry_search:
                     )
 
                     st.dataframe(
-                        result_df[display_cols].sort_values(
-                            sort_key, ascending=False
-                        ),
+                        result_df[display_cols].sort_values(sort_key, ascending=False),
                         use_container_width=True,
                         height=600,
                         hide_index=True,
                     )
 
-                    # ── 統計 ────────────────────────────
                     with st.expander("📊 検索結果の統計"):
                         c1, c2, c3, c4 = st.columns(4)
                         with c1:
                             st.metric("銘柄数", len(result_df))
                         with c2:
                             if 'Screening_Score' in result_df.columns:
-                                st.metric(
-                                    "平均スコア",
-                                    f"{result_df['Screening_Score'].mean():.1f}"
-                                )
+                                st.metric("平均スコア", f"{result_df['Screening_Score'].mean():.1f}")
                         with c3:
                             if 'Individual_RS_Percentile' in result_df.columns:
-                                st.metric(
-                                    "平均個別RS",
-                                    f"{result_df['Individual_RS_Percentile'].mean():.1f}%"
-                                )
+                                st.metric("平均個別RS", f"{result_df['Individual_RS_Percentile'].mean():.1f}%")
                         with c4:
                             if 'ADR' in result_df.columns:
-                                st.metric(
-                                    "平均ADR",
-                                    f"{result_df['ADR'].mean():.1f}%"
-                                )
+                                st.metric("平均ADR", f"{result_df['ADR'].mean():.1f}%")
 
-                    # ── ダウンロード ─────────────────────
                     dl1, dl2 = st.columns(2)
                     with dl1:
-                        csv = result_df[display_cols].to_csv(
-                            index=False
-                        ).encode('utf-8')
+                        csv = result_df[display_cols].to_csv(index=False, encoding='utf-8-sig')
                         st.download_button(
                             label="📥 CSVダウンロード",
-                            data=csv,
-                            file_name=(
-                                f"industry_search_"
-                                f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-                            ),
+                            data=csv.encode('utf-8-sig'),
+                            file_name=f"jp_industry_search_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                             mime='text/csv',
                             key="industry_search_dl_csv",
                         )
                     with dl2:
-                        if 'Symbol' in result_df.columns:
-                            syms = (
+                        if 'Code' in result_df.columns:
+                            codes = (
                                 result_df.sort_values(sort_key, ascending=False)
-                                ['Symbol'].dropna().astype(str).tolist()
+                                ['Code'].dropna().astype(str).tolist()
                             )
                             st.download_button(
-                                label="📝 Symbolリスト（TXT）",
-                                data=','.join(syms),
-                                file_name=(
-                                    f"industry_symbols_"
-                                    f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-                                ),
+                                label="📝 証券コードリスト（TXT）",
+                                data=','.join(codes),
+                                file_name=f"jp_industry_codes_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
                                 mime='text/plain',
                                 key="industry_search_dl_txt",
                             )
 
-                    # ── TradingView用Symbolリスト ────────
-                    if 'Symbol' in result_df.columns:
-                        with st.expander("📌 Symbolリスト表示（TradingView用）"):
-                            syms = (
+                    if 'Code' in result_df.columns:
+                        with st.expander("📌 証券コードリスト表示"):
+                            codes = (
                                 result_df.sort_values(sort_key, ascending=False)
-                                ['Symbol'].dropna().astype(str).tolist()
+                                ['Code'].dropna().astype(str).tolist()
                             )
                             st.markdown("**カンマ区切り（コピー用）:**")
-                            st.code(','.join(syms), language=None)
-                            st.success(f"✅ 合計 {len(syms)} 銘柄")
-                            if len(syms) > 10:
-                                st.info(
-                                    f"📊 上位10銘柄: {', '.join(syms[:10])}"
-                                )
+                            st.code(','.join(codes), language=None)
+                            st.success(f"✅ 合計 {len(codes)} 銘柄")
+                            if len(codes) > 10:
+                                st.info(f"📊 上位10銘柄: {', '.join(codes[:10])}")
 
         else:
-            # ── 未検索時はIndustry一覧のみ表示 ──────────
             st.info(
                 f"💡 上の検索欄にIndustry名を入力すると該当銘柄を表示します。\n\n"
                 f"利用可能なIndustry数: **{len(industry_list)}件**"
